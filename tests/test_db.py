@@ -1,10 +1,6 @@
 from datetime import date
 from decimal import Decimal
 
-import pytest
-
-sqlalchemy = pytest.importorskip("sqlalchemy")
-
 from sqlalchemy import inspect, select
 
 from nutag.db import create_database, create_engine_for_url, create_session_factory
