@@ -16,6 +16,9 @@ dev = [
     "pytest>=8.0",
 ]
 
+[tool.setuptools]
+packages = ["nutag"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
