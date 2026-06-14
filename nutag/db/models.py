@@ -135,3 +135,45 @@ class PurchaseItem(Base, TimestampMixin):
     unit: Mapped[Unit] = relationship(back_populates="purchase_items")
     ingredient: Mapped[Ingredient | None] = relationship(back_populates="purchase_items")
     packaging: Mapped[Packaging | None] = relationship(back_populates="purchase_items")
+
+
+class Preparation(Base, TimestampMixin):
+    """Internal semi-finished product prepared for future production batches."""
+
+    __tablename__ = "preparations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    prepared_on: Mapped[date] = mapped_column(Date, nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    output_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    output_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    labor_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    other_direct_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    output_unit: Mapped[Unit] = relationship()
+    ingredient_uses: Mapped[list[PreparationIngredientUse]] = relationship(
+        back_populates="preparation",
+        cascade="all, delete-orphan",
+    )
+
+
+class PreparationIngredientUse(Base, TimestampMixin):
+    """Ingredient quantity and cost consumed by a preparation."""
+
+    __tablename__ = "preparation_ingredient_uses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    preparation_id: Mapped[int] = mapped_column(ForeignKey("preparations.id"), nullable=False)
+    ingredient_id: Mapped[int] = mapped_column(ForeignKey("ingredients.id"), nullable=False)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    preparation: Mapped[Preparation] = relationship(back_populates="ingredient_uses")
+    ingredient: Mapped[Ingredient] = relationship()
+    unit: Mapped[Unit] = relationship()

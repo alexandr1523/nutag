@@ -20,6 +20,8 @@ def test_create_database_creates_initial_tables() -> None:
         "packaging",
         "purchases",
         "purchase_items",
+        "preparations",
+        "preparation_ingredient_uses",
     }.issubset(table_names)
 
 
