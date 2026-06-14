@@ -22,6 +22,10 @@ def test_create_database_creates_initial_tables() -> None:
         "purchase_items",
         "preparations",
         "preparation_ingredient_uses",
+        "production_batches",
+        "batch_ingredient_uses",
+        "batch_preparation_uses",
+        "finished_product_outputs",
     }.issubset(table_names)
 
 

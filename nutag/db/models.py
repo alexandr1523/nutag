@@ -177,3 +177,96 @@ class PreparationIngredientUse(Base, TimestampMixin):
     preparation: Mapped[Preparation] = relationship(back_populates="ingredient_uses")
     ingredient: Mapped[Ingredient] = relationship()
     unit: Mapped[Unit] = relationship()
+
+
+class ProductionBatch(Base, TimestampMixin):
+    """Final production batch with actual output and calculated cost."""
+
+    __tablename__ = "production_batches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    produced_on: Mapped[date] = mapped_column(Date, nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    planned_quantity: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
+    actual_output_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    output_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    labor_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    equipment_depreciation: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    allocated_overhead: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="completed", nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    product: Mapped[Product] = relationship()
+    output_unit: Mapped[Unit] = relationship()
+    ingredient_uses: Mapped[list[BatchIngredientUse]] = relationship(
+        back_populates="batch",
+        cascade="all, delete-orphan",
+    )
+    preparation_uses: Mapped[list[BatchPreparationUse]] = relationship(
+        back_populates="batch",
+        cascade="all, delete-orphan",
+    )
+    outputs: Mapped[list[FinishedProductOutput]] = relationship(
+        back_populates="batch",
+        cascade="all, delete-orphan",
+    )
+
+
+class BatchIngredientUse(Base, TimestampMixin):
+    """Ingredient quantity and cost consumed directly by a production batch."""
+
+    __tablename__ = "batch_ingredient_uses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("production_batches.id"), nullable=False)
+    ingredient_id: Mapped[int] = mapped_column(ForeignKey("ingredients.id"), nullable=False)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    batch: Mapped[ProductionBatch] = relationship(back_populates="ingredient_uses")
+    ingredient: Mapped[Ingredient] = relationship()
+    unit: Mapped[Unit] = relationship()
+
+
+class BatchPreparationUse(Base, TimestampMixin):
+    """Preparation quantity and cost consumed by a production batch."""
+
+    __tablename__ = "batch_preparation_uses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("production_batches.id"), nullable=False)
+    preparation_id: Mapped[int] = mapped_column(ForeignKey("preparations.id"), nullable=False)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    batch: Mapped[ProductionBatch] = relationship(back_populates="preparation_uses")
+    preparation: Mapped[Preparation] = relationship()
+    unit: Mapped[Unit] = relationship()
+
+
+class FinishedProductOutput(Base, TimestampMixin):
+    """Packaged finished product output from a production batch."""
+
+    __tablename__ = "finished_product_outputs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("production_batches.id"), nullable=False)
+    package_size: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    package_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    package_count: Mapped[int] = mapped_column(nullable=False)
+    total_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    frozen_on: Mapped[date | None] = mapped_column(Date)
+    use_by: Mapped[date | None] = mapped_column(Date)
+    storage_place: Mapped[str | None] = mapped_column(String(128))
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    batch: Mapped[ProductionBatch] = relationship(back_populates="outputs")
+    package_unit: Mapped[Unit] = relationship()
