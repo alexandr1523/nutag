@@ -105,11 +105,79 @@ with tabs[1]:
         else:
             st.info("Справочник пуст")
 
-# Stubs for other tabs to be implemented later
+# --- Products Tab ---
 with tabs[2]:
     st.header("Продукты")
-    st.info("Раздел в разработке")
+    
+    with st.form("add_product"):
+        st.subheader("Добавить продукт")
+        name = st.text_input("Название продукта (например, Пельмени)")
+        comment = st.text_area("Комментарий", key="prod_comment")
+        submitted = st.form_submit_button("Добавить")
+        
+        if submitted:
+            if not name:
+                st.error("Название обязательно")
+            else:
+                with SessionLocal() as db:
+                    new_prod = Product(name=name, comment=comment)
+                    db.add(new_prod)
+                    try:
+                        db.commit()
+                        st.success(f"Продукт '{name}' добавлен")
+                    except Exception as e:
+                        db.rollback()
+                        st.error(f"Ошибка при добавлении: {e}")
 
+    st.subheader("Список продуктов")
+    with SessionLocal() as db:
+        products = db.query(Product).all()
+        if products:
+            for p in products:
+                st.write(f"**{p.name}**")
+        else:
+            st.info("Справочник пуст")
+
+# --- Packaging Tab ---
 with tabs[3]:
     st.header("Упаковка")
-    st.info("Раздел в разработке")
+    
+    with SessionLocal() as db:
+        units = db.query(Unit).all()
+        unit_options = {u.name: u.id for u in units}
+        
+        if not unit_options:
+            st.warning("Сначала добавьте единицы измерения")
+        else:
+            with st.form("add_packaging"):
+                st.subheader("Добавить упаковку")
+                name = st.text_input("Название упаковки (например, Контейнер 0.5)")
+                unit_name = st.selectbox("Единица измерения", options=list(unit_options.keys()), key="pkg_unit")
+                comment = st.text_area("Комментарий", key="pkg_comment")
+                submitted = st.form_submit_button("Добавить")
+                
+                if submitted:
+                    if not name:
+                        st.error("Название обязательно")
+                    else:
+                        new_pkg = Packaging(
+                            name=name, 
+                            unit_id=unit_options[unit_name], 
+                            comment=comment
+                        )
+                        db.add(new_pkg)
+                        try:
+                            db.commit()
+                            st.success(f"Упаковка '{name}' добавлена")
+                        except Exception as e:
+                            db.rollback()
+                            st.error(f"Ошибка при добавлении: {e}")
+
+    st.subheader("Список упаковок")
+    with SessionLocal() as db:
+        packaging = db.query(Packaging).all()
+        if packaging:
+            for pkg in packaging:
+                st.write(f"**{pkg.name}** ({pkg.unit.short_name})")
+        else:
+            st.info("Справочник пуст")

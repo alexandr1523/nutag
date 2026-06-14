@@ -270,3 +270,86 @@ class FinishedProductOutput(Base, TimestampMixin):
 
     batch: Mapped[ProductionBatch] = relationship(back_populates="outputs")
     package_unit: Mapped[Unit] = relationship()
+
+
+class OrderStatus(StrEnum):
+    """Business status of an order."""
+
+    NEW = "new"
+    CONFIRMED = "confirmed"
+    READY = "ready"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
+
+
+class PaymentStatus(StrEnum):
+    """Payment status for accounting."""
+
+    PENDING = "pending"
+    PAID = "paid"
+    ON_DELIVERY = "on_delivery"
+    REFUNDED = "refunded"
+
+
+class ReservationStatus(StrEnum):
+    """Internal stock reservation status."""
+
+    NOT_RESERVED = "not_reserved"
+    IN_PLAN = "in_plan"
+    RESERVED = "reserved"
+    PARTIAL = "partial"
+    RELEASED = "released"
+
+
+class Order(Base, TimestampMixin):
+    """Customer order for one or more products."""
+
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_date: Mapped[date] = mapped_column(Date, nullable=False)
+    customer_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    customer_contact: Mapped[str | None] = mapped_column(String(128))
+    
+    order_status: Mapped[OrderStatus] = mapped_column(String(32), default=OrderStatus.NEW, nullable=False)
+    payment_status: Mapped[PaymentStatus] = mapped_column(String(32), default=PaymentStatus.PENDING, nullable=False)
+    reservation_status: Mapped[ReservationStatus] = mapped_column(String(32), default=ReservationStatus.NOT_RESERVED, nullable=False)
+    
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    delivery_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    
+    comment: Mapped[str | None] = mapped_column(Text)
+    has_problem: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+    items: Mapped[list[OrderItem]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+    )
+
+
+class OrderItem(Base, TimestampMixin):
+    """Individual product line in an order."""
+
+    __tablename__ = "order_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    
+    # We can link an order item to a specific batch output if it's reserved/fulfilled
+    batch_output_id: Mapped[int | None] = mapped_column(ForeignKey("finished_product_outputs.id"))
+    
+    package_size: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    package_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    package_count: Mapped[int] = mapped_column(nullable=False)
+    total_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    total_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    order: Mapped[Order] = relationship(back_populates="items")
+    product: Mapped[Product] = relationship()
+    package_unit: Mapped[Unit] = relationship()
+    batch_output: Mapped[FinishedProductOutput | None] = relationship()
