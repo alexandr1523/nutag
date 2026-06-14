@@ -33,31 +33,43 @@
 1. Открыть GitHub и посмотреть PR.
 2. Если всё устраивает — нажать **Merge pull request**.
 3. Перейти в Codespace.
-4. Подтянуть изменения:
+4. Проверить текущую ветку:
 
 ```bash
-git pull
+git status --short --branch
 ```
 
-5. Если менялся `pyproject.toml` или появились новые зависимости — обновить окружение:
+5. Переключиться на `main`, если ты сейчас не на ней:
+
+```bash
+git checkout main
+```
+
+6. Подтянуть свежий `main` из GitHub:
+
+```bash
+git pull origin main
+```
+
+7. Если менялся `pyproject.toml` или появились новые зависимости — обновить окружение:
 
 ```bash
 python -m pip install -e '.[dev]'
 ```
 
-6. Запустить тесты:
+8. Запустить тесты:
 
 ```bash
 pytest -q
 ```
 
-7. Если нужно посмотреть приложение:
+9. Если нужно посмотреть приложение:
 
 ```bash
 streamlit run app.py
 ```
 
-8. Проверить состояние git:
+10. Проверить состояние git:
 
 ```bash
 git status --short --branch
