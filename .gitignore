@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Nutag local runtime data
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+nutag.sqlite3
+nutag.sqlite3-journal
+
+# macOS
+.DS_Store

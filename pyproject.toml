@@ -1,0 +1,21 @@
+[project]
+name = "nutag"
+version = "0.1.0"
+description = "Local Streamlit app for home frozen semi-finished product production accounting."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openpyxl>=3.1",
+    "pandas>=2.2",
+    "sqlalchemy>=2.0",
+    "streamlit>=1.37",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
