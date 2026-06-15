@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 from sqlalchemy.orm import Session
-from nutag.db.models import Unit, Ingredient, Product, Packaging, Consumable, Equipment, FixedExpenseCategory
+from nutag.db.models import Unit, Ingredient, Product, Packaging, Consumable, Equipment, FixedExpenseCategory, LaborRate
 from nutag.db.session import create_engine_for_url, create_session_factory
 
 
@@ -25,7 +25,7 @@ def get_db():
         db.close()
 
 
-tabs = st.tabs(["Единицы измерения", "Ингредиенты", "Продукты", "Упаковка", "Расходники", "Оборудование", "Постоянные расходы"])
+tabs = st.tabs(["Единицы измерения", "Ингредиенты", "Продукты", "Упаковка", "Расходники", "Оборудование", "Постоянные расходы", "Стоимость труда"])
 
 # --- Units Tab ---
 with tabs[0]:
@@ -235,6 +235,7 @@ with tabs[5]:
         name = st.text_input("Название (например, Морозильник)")
         cost = st.number_input("Стоимость покупки", min_value=0.0, step=100.0)
         life = st.number_input("Срок полезного использования (мес)", min_value=1, step=1)
+        h_cost = st.number_input("Стоимость 1 часа работы", min_value=0.0, step=1.0, help="Для автоматического расчёта амортизации")
         comment = st.text_area("Комментарий", key="equip_comment")
         submitted = st.form_submit_button("Добавить")
         
@@ -247,6 +248,7 @@ with tabs[5]:
                         name=name, 
                         cost=cost, 
                         useful_life_months=life, 
+                        hourly_cost=h_cost,
                         comment=comment
                     )
                     db.add(new_equip)
@@ -298,3 +300,40 @@ with tabs[6]:
                 st.write(f"**{cat.name}**")
         else:
             st.info("Справочник пуст")
+
+# --- Labor Rate Tab ---
+with tabs[7]:
+    st.header("Стоимость труда")
+    
+    with SessionLocal() as db:
+        current_rate = db.query(LaborRate).filter(LaborRate.is_active == True).first()
+        
+        with st.form("set_labor_rate"):
+            st.subheader("Установить стоимость часа")
+            rate_val = st.number_input(
+                "Стоимость 1 часа работы", 
+                min_value=0.0, 
+                value=float(current_rate.hourly_rate) if current_rate else 0.0,
+                step=10.0
+            )
+            submitted = st.form_submit_button("Сохранить")
+            
+            if submitted:
+                # Deactivate old rate
+                if current_rate:
+                    current_rate.is_active = False
+                
+                new_rate = LaborRate(hourly_rate=rate_val, is_active=True)
+                db.add(new_rate)
+                try:
+                    db.commit()
+                    st.success(f"Стоимость часа установлена: {rate_val:,.2f}")
+                    st.rerun()
+                except Exception as e:
+                    db.rollback()
+                    st.error(f"Ошибка: {e}")
+
+    if current_rate:
+        st.metric("Текущая ставка", f"{current_rate.hourly_rate:,.2f} / час")
+    else:
+        st.warning("Ставка не установлена")

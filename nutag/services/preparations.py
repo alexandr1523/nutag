@@ -48,6 +48,7 @@ def create_preparation(
     prepared_on: date,
     name: str,
     output_quantity: Decimal | int | float | str,
+    waste_quantity: Decimal | int | float | str = 0,
     output_unit: Unit,
     ingredient_uses: Iterable[PreparationIngredientInput],
     labor_cost: Decimal | int | float | str = 0,
@@ -57,6 +58,7 @@ def create_preparation(
     """Create an internal preparation and calculate its total and unit cost."""
 
     output_quantity_decimal = to_decimal(output_quantity)
+    waste_quantity_decimal = to_decimal(waste_quantity)
     if output_quantity_decimal <= 0:
         raise ValueError("Preparation output quantity must be greater than zero")
 
@@ -78,6 +80,7 @@ def create_preparation(
         prepared_on=prepared_on,
         name=name,
         output_quantity=output_quantity_decimal,
+        waste_quantity=waste_quantity_decimal,
         output_unit=output_unit,
         labor_cost=to_decimal(labor_cost),
         other_direct_cost=to_decimal(other_direct_cost),

@@ -84,3 +84,10 @@ st.markdown(
 )
 
 st.sidebar.success("Выберите раздел выше, чтобы начать.")
+
+st.sidebar.divider()
+if st.sidebar.button("🚪 Выйти из программы", use_container_width=True):
+    import os
+    import signal
+    st.sidebar.success("Работа завершена. Закройте это окно.")
+    os.kill(os.getpid(), signal.SIGTERM)

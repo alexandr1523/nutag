@@ -114,6 +114,7 @@ class Equipment(Base, TimestampMixin):
     purchase_date: Mapped[date | None] = mapped_column(Date)
     cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
     useful_life_months: Mapped[int | None]
+    hourly_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text)
 
 
@@ -139,6 +140,17 @@ class FixedExpense(Base, TimestampMixin):
     comment: Mapped[str | None] = mapped_column(Text)
 
     category: Mapped[FixedExpenseCategory] = relationship()
+
+
+class LaborRate(Base, TimestampMixin):
+    """Hourly labor rate for cost calculations."""
+
+    __tablename__ = "labor_rates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), default="Default", nullable=False)
+    hourly_rate: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
 
 
 class Purchase(Base, TimestampMixin):
@@ -199,6 +211,7 @@ class Preparation(Base, TimestampMixin):
     prepared_on: Mapped[date] = mapped_column(Date, nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     output_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    waste_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"), nullable=False)
     output_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
     labor_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
     other_direct_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
@@ -242,6 +255,7 @@ class ProductionBatch(Base, TimestampMixin):
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     planned_quantity: Mapped[Decimal | None] = mapped_column(Numeric(12, 3))
     actual_output_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    waste_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"), nullable=False)
     output_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
     labor_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
     equipment_depreciation: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)

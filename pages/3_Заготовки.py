@@ -34,6 +34,7 @@ with tabs[0]:
                     with col1:
                         st.write(f"**Дата:** {p.prepared_on}")
                         st.write(f"**Выход:** {p.output_quantity} {p.output_unit.short_name}")
+                        st.write(f"**Отходы:** {p.waste_quantity} {p.output_unit.short_name}")
                         st.write(f"**Труд:** {p.labor_cost:,.2f}")
                         st.write(f"**Прочее:** {p.other_direct_cost:,.2f}")
                     with col2:
@@ -78,19 +79,32 @@ with tabs[1]:
                 with col3:
                     prep_comment = st.text_area("Комментарий", key="prep_comm")
                 
-                st.subheader("Выход")
-                c1, c2 = st.columns(2)
+                st.subheader("Выход и отходы")
+                c1, c2, c3 = st.columns(3)
                 with c1:
-                    output_qty = st.number_input("Кол-во на выходе", min_value=0.0, step=0.1, format="%.3f")
+                    output_qty = st.number_input("Кол-во на выходе (годное)", min_value=0.0, step=0.1, format="%.3f")
                 with c2:
-                    output_unit_name = st.selectbox("Ед. изм. выхода", options=list(all_units.keys()))
+                    waste_qty = st.number_input("Отходы/Обрезь", min_value=0.0, step=0.1, format="%.3f")
+                with c3:
+                    output_unit_name = st.selectbox("Ед. изм.", options=list(all_units.keys()))
                 
                 st.subheader("Расходы")
-                c3, c4 = st.columns(2)
+                c3, c4, c5 = st.columns(3)
+                with SessionLocal() as db_rate:
+                    current_labor_rate = db_rate.query(LaborRate).filter(LaborRate.is_active == True).first()
+                    rate_val = float(current_labor_rate.hourly_rate) if current_labor_rate else 0.0
+
                 with c3:
-                    labor_cost = st.number_input("Стоимость труда", min_value=0.0, step=10.0, format="%.2f")
+                    labor_hours = st.number_input("Время труда (часы)", min_value=0.0, step=0.1, format="%.2f")
                 with c4:
-                    other_cost = st.number_input("Прочие прямые расходы", min_value=0.0, step=10.0, format="%.2f")
+                    st.write(f"Текущая ставка:")
+                    st.info(f"{rate_val:,.2f} / час")
+                with c5:
+                    calculated_labor_cost = Decimal(str(labor_hours * rate_val))
+                    st.write(f"Итого за труд:")
+                    st.success(f"{calculated_labor_cost:,.2f}")
+                
+                other_cost = st.number_input("Прочие прямые расходы", min_value=0.0, step=10.0, format="%.2f")
 
                 st.subheader("Ингредиенты (до 5 в MVP)")
                 ingredient_uses = []
@@ -113,7 +127,10 @@ with tabs[1]:
                     with cc:
                         qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"ing_qty_{i}")
                     with cd:
-                        price = st.number_input(f"Цена за ед {i}", min_value=0.0, value=default_price, step=1.0, format="%.2f", key=f"ing_price_{i}")
+                        # Price is now pulled automatically and shown as information
+                        st.write(f"Цена за ед:")
+                        st.info(f"{default_price:,.2f}")
+                        price = default_price
                     
                     if ing_name and qty > 0:
                         ingredient_uses.append(PreparationIngredientInput(
@@ -150,9 +167,10 @@ with tabs[1]:
                                     prepared_on=prep_date,
                                     name=prep_name,
                                     output_quantity=Decimal(str(output_qty)),
+                                    waste_quantity=Decimal(str(waste_qty)),
                                     output_unit=db_output_unit,
                                     ingredient_uses=db_ing_uses,
-                                    labor_cost=Decimal(str(labor_cost)),
+                                    labor_cost=calculated_labor_cost,
                                     other_direct_cost=Decimal(str(other_cost)),
                                     comment=prep_comment
                                 )

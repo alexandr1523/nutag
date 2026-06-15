@@ -99,11 +99,11 @@ with tabs[2]:
                 transport_cost = st.number_input("Транспортные расходы", min_value=0.0, step=10.0, format="%.2f")
                 comment = st.text_area("Общий комментарий")
                 
-                st.subheader("Позиции (до 5 за раз в MVP)")
+                st.subheader("Позиции (до 10 за раз в MVP)")
                 lines = []
-                for i in range(5):
+                for i in range(10):
                     st.markdown(f"**Позиция {i+1}**")
-                    c1, c2, c3, c4, c5 = st.columns([2, 3, 1, 2, 2])
+                    c1, c2, c3, c4, c5, c6 = st.columns([2, 3, 1, 1, 2, 2])
                     with c1:
                         item_type_val = st.selectbox(
                             f"Тип {i}", 
@@ -129,9 +129,17 @@ with tabs[2]:
                     with c4:
                         qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"qty_{i}")
                     with c5:
-                        price = st.number_input(f"Цена за ед {i}", min_value=0.0, step=1.0, format="%.2f", key=f"price_{i}")
+                        price_unit = st.number_input(f"Цена/ед {i}", min_value=0.0, step=1.0, format="%.2f", key=f"price_unit_{i}")
+                    with c6:
+                        price_total = st.number_input(f"Итого {i}", min_value=0.0, step=1.0, format="%.2f", key=f"price_total_{i}")
                     
                     if item_name and qty > 0:
+                        # Logic: if price_total is provided and price_unit is 0, calculate price_unit.
+                        # If both are provided, price_unit takes priority or we can validate.
+                        final_price_unit = Decimal(str(price_unit))
+                        if final_price_unit == 0 and price_total > 0:
+                            final_price_unit = Decimal(str(price_total)) / Decimal(str(qty))
+                        
                         ing = ingredients.get(item_name) if item_type_val == PurchaseItemType.INGREDIENT else None
                         pkg = packaging.get(item_name) if item_type_val == PurchaseItemType.PACKAGING else None
                         cons = consumables.get(item_name) if item_type_val == PurchaseItemType.CONSUMABLE else None
@@ -141,7 +149,7 @@ with tabs[2]:
                             item_name=item_name,
                             unit=units[unit_short],
                             quantity=Decimal(str(qty)),
-                            unit_price=Decimal(str(price)),
+                            unit_price=final_price_unit,
                             ingredient=ing,
                             packaging=pkg,
                             consumable=cons
