@@ -13,8 +13,10 @@ from sqlalchemy.orm import Session
 from nutag.db.models import (
     BatchIngredientUse,
     BatchPreparationUse,
+    BatchPackagingUse,
     FinishedProductOutput,
     Ingredient,
+    Packaging,
     Preparation,
     Product,
     ProductionBatch,
@@ -40,6 +42,17 @@ class BatchPreparationInput:
     """Internal preparation consumed by a production batch."""
 
     preparation: Preparation
+    unit: Unit
+    quantity: Decimal | int | float | str
+    unit_cost: Decimal | int | float | str
+    comment: str | None = None
+
+
+@dataclass(frozen=True)
+class BatchPackagingInput:
+    """Packaging consumed by a production batch."""
+
+    packaging: Packaging
     unit: Unit
     quantity: Decimal | int | float | str
     unit_cost: Decimal | int | float | str
@@ -85,6 +98,7 @@ def create_production_batch(
     outputs: Iterable[FinishedProductOutputInput],
     ingredient_uses: Iterable[BatchIngredientInput] = (),
     preparation_uses: Iterable[BatchPreparationInput] = (),
+    packaging_uses: Iterable[BatchPackagingInput] = (),
     planned_quantity: Decimal | int | float | str | None = None,
     labor_cost: Decimal | int | float | str = 0,
     equipment_depreciation: Decimal | int | float | str = 0,
@@ -104,6 +118,7 @@ def create_production_batch(
 
     ingredient_inputs = list(ingredient_uses)
     preparation_inputs = list(preparation_uses)
+    packaging_inputs = list(packaging_uses)
 
     ingredient_total_costs = [
         calculate_ingredient_use_total(quantity=line.quantity, unit_cost=line.unit_cost) for line in ingredient_inputs
@@ -111,6 +126,10 @@ def create_production_batch(
     preparation_total_costs = [
         calculate_ingredient_use_total(quantity=line.quantity, unit_cost=line.unit_cost) for line in preparation_inputs
     ]
+    packaging_total_costs = [
+        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=line.unit_cost) for line in packaging_inputs
+    ]
+    
     total_cost = calculate_batch_cost(
         raw_material_costs=ingredient_total_costs,
         preparation_costs=preparation_total_costs,
@@ -118,6 +137,9 @@ def create_production_batch(
         equipment_depreciation=equipment_depreciation,
         allocated_overhead=allocated_overhead,
     )
+    # Add packaging costs to total cost if needed, or if they are in raw_material_costs
+    total_cost += sum(packaging_total_costs, Decimal("0"))
+    
     unit_cost = calculate_unit_cost(total_cost=total_cost, actual_output=actual_output_decimal)
 
     batch = ProductionBatch(
@@ -151,6 +173,18 @@ def create_production_batch(
         batch.preparation_uses.append(
             BatchPreparationUse(
                 preparation=line.preparation,
+                unit=line.unit,
+                quantity=to_decimal(line.quantity),
+                unit_cost=to_decimal(line.unit_cost),
+                total_cost=line_total,
+                comment=line.comment,
+            )
+        )
+        
+    for line, line_total in zip(packaging_inputs, packaging_total_costs, strict=True):
+        batch.packaging_uses.append(
+            BatchPackagingUse(
+                packaging=line.packaging,
                 unit=line.unit,
                 quantity=to_decimal(line.quantity),
                 unit_cost=to_decimal(line.unit_cost),

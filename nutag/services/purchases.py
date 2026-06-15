@@ -10,7 +10,7 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from nutag.db.models import Ingredient, Packaging, Purchase, PurchaseItem, PurchaseItemType, Unit
+from nutag.db.models import Ingredient, Packaging, Consumable, Purchase, PurchaseItem, PurchaseItemType, Unit
 from nutag.services.calculations import to_decimal
 
 
@@ -25,6 +25,7 @@ class PurchaseLineInput:
     unit_price: Decimal | int | float | str
     ingredient: Ingredient | None = None
     packaging: Packaging | None = None
+    consumable: Consumable | None = None
     expires_on: date | None = None
     comment: str | None = None
 
@@ -83,6 +84,7 @@ def create_purchase(
                 item_type=line.item_type,
                 ingredient=line.ingredient,
                 packaging=line.packaging,
+                consumable=line.consumable,
                 item_name=line.item_name,
                 unit=line.unit,
                 quantity=to_decimal(line.quantity),

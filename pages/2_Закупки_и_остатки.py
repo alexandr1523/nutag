@@ -6,7 +6,7 @@ import streamlit as st
 from decimal import Decimal
 from datetime import date
 from sqlalchemy.orm import Session
-from nutag.db.models import Ingredient, Packaging, Unit, PurchaseItemType
+from nutag.db.models import Ingredient, Packaging, Unit, PurchaseItemType, Consumable
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.inventory import list_inventory_balances
 from nutag.services.purchases import create_purchase, list_purchases, PurchaseLineInput
@@ -29,17 +29,19 @@ with tabs[0]:
         balances = list_inventory_balances(db)
         if balances:
             import pandas as pd
-            df = pd.DataFrame([
-                {
+            df_data = []
+            for b in balances:
+                df_data.append({
                     "Тип": b.item_type,
                     "Наименование": b.item_name,
-                    "Остаток": b.purchased_quantity,
+                    "Закуплено": f"{b.purchased_quantity:,.3f}",
+                    "Использовано": f"{b.used_quantity:,.3f}",
+                    "Остаток": f"{b.current_quantity:,.3f}",
                     "Ед.изм.": b.unit_short_name,
                     "Средняя цена": f"{b.weighted_average_price:,.2f}",
-                    "Стоимость": f"{b.purchased_value:,.2f}"
-                } for b in balances
-            ])
-            st.table(df)
+                    "Стоимость остатка": f"{(b.current_quantity * b.weighted_average_price):,.2f}"
+                })
+            st.table(pd.DataFrame(df_data))
         else:
             st.info("На складе пока ничего нет. Зафиксируйте первую закупку.")
 
@@ -79,6 +81,7 @@ with tabs[2]:
         # Load directories for dropdowns
         ingredients = {i.name: i for i in db.query(Ingredient).all()}
         packaging = {p.name: p for p in db.query(Packaging).all()}
+        consumables = {c.name: c for c in db.query(Consumable).all()}
         units = {u.short_name: u for u in db.query(Unit).all()}
         
         if not units:
@@ -102,19 +105,22 @@ with tabs[2]:
                     st.markdown(f"**Позиция {i+1}**")
                     c1, c2, c3, c4, c5 = st.columns([2, 3, 1, 2, 2])
                     with c1:
-                        item_type = st.selectbox(
+                        item_type_val = st.selectbox(
                             f"Тип {i}", 
                             options=[t.value for t in PurchaseItemType], 
                             key=f"type_{i}"
                         )
                     with c2:
                         # Depending on type, show different options
-                        if item_type == PurchaseItemType.INGREDIENT:
+                        if item_type_val == PurchaseItemType.INGREDIENT:
                             name_options = list(ingredients.keys())
                             item_name = st.selectbox(f"Ингредиент {i}", options=[""] + name_options, key=f"name_{i}")
-                        elif item_type == PurchaseItemType.PACKAGING:
+                        elif item_type_val == PurchaseItemType.PACKAGING:
                             name_options = list(packaging.keys())
                             item_name = st.selectbox(f"Упаковка {i}", options=[""] + name_options, key=f"name_{i}")
+                        elif item_type_val == PurchaseItemType.CONSUMABLE:
+                            name_options = list(consumables.keys())
+                            item_name = st.selectbox(f"Расходник {i}", options=[""] + name_options, key=f"name_{i}")
                         else:
                             item_name = st.text_input(f"Наименование {i}", key=f"name_{i}")
                     
@@ -126,17 +132,19 @@ with tabs[2]:
                         price = st.number_input(f"Цена за ед {i}", min_value=0.0, step=1.0, format="%.2f", key=f"price_{i}")
                     
                     if item_name and qty > 0:
-                        ing = ingredients.get(item_name) if item_type == PurchaseItemType.INGREDIENT else None
-                        pkg = packaging.get(item_name) if item_type == PurchaseItemType.PACKAGING else None
+                        ing = ingredients.get(item_name) if item_type_val == PurchaseItemType.INGREDIENT else None
+                        pkg = packaging.get(item_name) if item_type_val == PurchaseItemType.PACKAGING else None
+                        cons = consumables.get(item_name) if item_type_val == PurchaseItemType.CONSUMABLE else None
                         
                         lines.append(PurchaseLineInput(
-                            item_type=PurchaseItemType(item_type),
+                            item_type=PurchaseItemType(item_type_val),
                             item_name=item_name,
                             unit=units[unit_short],
                             quantity=Decimal(str(qty)),
                             unit_price=Decimal(str(price)),
                             ingredient=ing,
-                            packaging=pkg
+                            packaging=pkg,
+                            consumable=cons
                         ))
                 
                 submitted = st.form_submit_button("Сохранить закупку")
@@ -156,7 +164,8 @@ with tabs[2]:
                                         quantity=line.quantity,
                                         unit_price=line.unit_price,
                                         ingredient=db_write.merge(line.ingredient) if line.ingredient else None,
-                                        packaging=db_write.merge(line.packaging) if line.packaging else None
+                                        packaging=db_write.merge(line.packaging) if line.packaging else None,
+                                        consumable=db_write.merge(line.consumable) if line.consumable else None
                                     ))
                                 
                                 create_purchase(

@@ -90,6 +90,57 @@ class Packaging(Base, TimestampMixin):
     purchase_items: Mapped[list[PurchaseItem]] = relationship(back_populates="packaging")
 
 
+class Consumable(Base, TimestampMixin):
+    """General consumables, for example gloves, paper, cleaning supplies."""
+
+    __tablename__ = "consumables"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    unit: Mapped[Unit] = relationship()
+    purchase_items: Mapped[list[PurchaseItem]] = relationship(back_populates="consumable")
+
+
+class Equipment(Base, TimestampMixin):
+    """Business equipment for depreciation and ROI tracking."""
+
+    __tablename__ = "equipment"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    purchase_date: Mapped[date | None] = mapped_column(Date)
+    cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0"), nullable=False)
+    useful_life_months: Mapped[int | None]
+    comment: Mapped[str | None] = mapped_column(Text)
+
+
+class FixedExpenseCategory(Base, TimestampMixin):
+    """Categories for recurring costs like rent or electricity."""
+
+    __tablename__ = "fixed_expense_categories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+
+class FixedExpense(Base, TimestampMixin):
+    """Actual fixed cost recorded for a period."""
+
+    __tablename__ = "fixed_expenses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    category_id: Mapped[int] = mapped_column(ForeignKey("fixed_expense_categories.id"), nullable=False)
+    expense_date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    category: Mapped[FixedExpenseCategory] = relationship()
+
+
 class Purchase(Base, TimestampMixin):
     """Purchase document containing one or more purchased positions."""
 
@@ -123,6 +174,7 @@ class PurchaseItem(Base, TimestampMixin):
     item_type: Mapped[PurchaseItemType] = mapped_column(String(32), nullable=False)
     ingredient_id: Mapped[int | None] = mapped_column(ForeignKey("ingredients.id"))
     packaging_id: Mapped[int | None] = mapped_column(ForeignKey("packaging.id"))
+    consumable_id: Mapped[int | None] = mapped_column(ForeignKey("consumables.id"))
     item_name: Mapped[str] = mapped_column(String(128), nullable=False)
     unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
@@ -135,6 +187,7 @@ class PurchaseItem(Base, TimestampMixin):
     unit: Mapped[Unit] = relationship(back_populates="purchase_items")
     ingredient: Mapped[Ingredient | None] = relationship(back_populates="purchase_items")
     packaging: Mapped[Packaging | None] = relationship(back_populates="purchase_items")
+    consumable: Mapped[Consumable | None] = relationship(back_populates="purchase_items")
 
 
 class Preparation(Base, TimestampMixin):
@@ -208,6 +261,10 @@ class ProductionBatch(Base, TimestampMixin):
         back_populates="batch",
         cascade="all, delete-orphan",
     )
+    packaging_uses: Mapped[list[BatchPackagingUse]] = relationship(
+        back_populates="batch",
+        cascade="all, delete-orphan",
+    )
     outputs: Mapped[list[FinishedProductOutput]] = relationship(
         back_populates="batch",
         cascade="all, delete-orphan",
@@ -249,6 +306,25 @@ class BatchPreparationUse(Base, TimestampMixin):
 
     batch: Mapped[ProductionBatch] = relationship(back_populates="preparation_uses")
     preparation: Mapped[Preparation] = relationship()
+    unit: Mapped[Unit] = relationship()
+
+
+class BatchPackagingUse(Base, TimestampMixin):
+    """Packaging quantity and cost consumed by a production batch."""
+
+    __tablename__ = "batch_packaging_uses"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("production_batches.id"), nullable=False)
+    packaging_id: Mapped[int] = mapped_column(ForeignKey("packaging.id"), nullable=False)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    batch: Mapped[ProductionBatch] = relationship(back_populates="packaging_uses")
+    packaging: Mapped[Packaging] = relationship()
     unit: Mapped[Unit] = relationship()
 
 
