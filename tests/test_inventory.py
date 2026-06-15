@@ -73,14 +73,14 @@ def test_inventory_balances_are_aggregated_from_purchase_lines() -> None:
 
     flour_balance = balances[0]
     assert flour_balance.unit_short_name == "kg"
-    assert flour_balance.purchased_quantity == Decimal("5.000")
-    assert flour_balance.purchased_value == Decimal("460.00")
+    assert flour_balance.inflow_quantity == Decimal("5.000")
+    assert flour_balance.inflow_value == Decimal("460.00")
     assert flour_balance.weighted_average_price == Decimal("92.00")
 
     packaging_balance = balances[1]
     assert packaging_balance.unit_short_name == "pcs"
-    assert packaging_balance.purchased_quantity == Decimal("10.000")
-    assert packaging_balance.purchased_value == Decimal("120.00")
+    assert packaging_balance.inflow_quantity == Decimal("10.000")
+    assert packaging_balance.inflow_value == Decimal("120.00")
     assert packaging_balance.weighted_average_price == Decimal("12.00")
 
 
