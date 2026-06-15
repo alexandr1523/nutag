@@ -6,7 +6,7 @@ import streamlit as st
 from decimal import Decimal
 from datetime import date
 from sqlalchemy.orm import Session
-from nutag.db.models import Ingredient, Unit
+from nutag.db.models import Ingredient, Unit, LaborRate
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.inventory import list_inventory_balances
 from nutag.services.preparations import create_preparation, list_preparations, PreparationIngredientInput
