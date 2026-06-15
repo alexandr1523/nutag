@@ -19,8 +19,8 @@ def export_inventory_to_excel(session: Session) -> bytes:
         data.append({
             "Тип": b.item_type,
             "Наименование": b.item_name,
-            "Закуплено": float(b.purchased_quantity),
-            "Использовано": float(b.used_quantity),
+            "Закуплено/Сделано": float(b.inflow_quantity),
+            "Использовано": float(b.outflow_quantity),
             "Остаток": float(b.current_quantity),
             "Ед.изм.": b.unit_short_name,
             "Средняя цена": float(b.weighted_average_price),

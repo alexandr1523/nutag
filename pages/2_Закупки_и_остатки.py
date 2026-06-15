@@ -34,8 +34,8 @@ with tabs[0]:
                 df_data.append({
                     "Тип": b.item_type,
                     "Наименование": b.item_name,
-                    "Закуплено": f"{b.purchased_quantity:,.3f}",
-                    "Использовано": f"{b.used_quantity:,.3f}",
+                    "Закуплено/Сделано": f"{b.inflow_quantity:,.3f}",
+                    "Использовано": f"{b.outflow_quantity:,.3f}",
                     "Остаток": f"{b.current_quantity:,.3f}",
                     "Ед.изм.": b.unit_short_name,
                     "Средняя цена": f"{b.weighted_average_price:,.2f}",
