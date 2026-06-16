@@ -8,7 +8,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 from nutag.db.models import Ingredient, Packaging, Unit, PurchaseItemType, Consumable
 from nutag.db.session import create_engine_for_url, create_session_factory
-from nutag.services.inventory import list_inventory_balances
+from nutag.services.inventory import list_inventory_balances, list_available_stock_batches
 from nutag.services.purchases import create_purchase, list_purchases, PurchaseLineInput
 
 
@@ -20,11 +20,11 @@ st.title("📦 Закупки и остатки")
 engine = create_engine_for_url()
 SessionLocal = create_session_factory(engine)
 
-tabs = st.tabs(["Текущие остатки", "История закупок", "Новая закупка"])
+tabs = st.tabs(["Текущие остатки", "Остатки по партиям", "История закупок", "Новая закупка"])
 
 # --- Current Stocks Tab ---
 with tabs[0]:
-    st.header("Текущие остатки")
+    st.header("Текущие остатки (агрегированно)")
     with SessionLocal() as db:
         balances = list_inventory_balances(db)
         if balances:
@@ -45,8 +45,31 @@ with tabs[0]:
         else:
             st.info("На складе пока ничего нет. Зафиксируйте первую закупку.")
 
-# --- Purchase History Tab ---
+# --- Batch Stocks Tab ---
 with tabs[1]:
+    st.header("Остатки в разрезе партий (FIFO)")
+    with SessionLocal() as db:
+        batches = list_available_stock_batches(db)
+        if batches:
+            import pandas as pd
+            df_batch_data = []
+            for b in batches:
+                df_batch_data.append({
+                    "Дата": b.date,
+                    "Тип": b.item_type,
+                    "Наименование": b.item_name,
+                    "Партия": f"#{b.batch_id} ({b.batch_type})",
+                    "Начальное кол-во": f"{b.initial_quantity:,.3f}",
+                    "Текущий остаток": f"{b.current_quantity:,.3f}",
+                    "Ед.изм.": b.unit_short_name,
+                    "Цена партии": f"{b.unit_price:,.2f}"
+                })
+            st.table(pd.DataFrame(df_batch_data))
+        else:
+            st.info("Нет доступных партий с остатками.")
+
+# --- Purchase History Tab ---
+with tabs[2]:
     st.header("История закупок")
     with SessionLocal() as db:
         purchases = list_purchases(db)
@@ -74,7 +97,7 @@ with tabs[1]:
             st.info("История закупок пуста")
 
 # --- New Purchase Tab ---
-with tabs[2]:
+with tabs[3]:
     st.header("Новая закупка")
     
     with SessionLocal() as db:

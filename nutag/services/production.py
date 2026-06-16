@@ -34,6 +34,7 @@ class BatchIngredientInput:
     unit: Unit
     quantity: Decimal | int | float | str
     unit_cost: Decimal | int | float | str
+    purchase_item_id: int | None = None
     comment: str | None = None
 
 
@@ -45,6 +46,7 @@ class BatchPreparationInput:
     unit: Unit
     quantity: Decimal | int | float | str
     unit_cost: Decimal | int | float | str
+    source_preparation_id: int | None = None
     comment: str | None = None
 
 
@@ -56,6 +58,7 @@ class BatchPackagingInput:
     unit: Unit
     quantity: Decimal | int | float | str
     unit_cost: Decimal | int | float | str
+    purchase_item_id: int | None = None
     comment: str | None = None
 
 

@@ -6,9 +6,9 @@ import streamlit as st
 from decimal import Decimal
 from datetime import date
 from sqlalchemy.orm import Session
-from nutag.db.models import Ingredient, Unit, LaborRate
+from nutag.db.models import Ingredient, Unit, LaborRate, PurchaseItemType
 from nutag.db.session import create_engine_for_url, create_session_factory
-from nutag.services.inventory import list_inventory_balances
+from nutag.services.inventory import list_available_stock_batches
 from nutag.services.preparations import create_preparation, list_preparations, PreparationIngredientInput
 
 
@@ -44,8 +44,9 @@ with tabs[0]:
                     st.subheader("Использованные ингредиенты")
                     ing_data = []
                     for use in p.ingredient_uses:
+                        source_info = f" (Партия #{use.purchase_item_id})" if use.purchase_item_id else ""
                         ing_data.append({
-                            "Ингредиент": use.ingredient.name,
+                            "Ингредиент": use.ingredient.name + source_info,
                             "Кол-во": use.quantity,
                             "Ед.изм.": use.unit.short_name,
                             "Цена": use.unit_cost,
@@ -60,15 +61,20 @@ with tabs[1]:
     st.header("Новая заготовка")
     
     with SessionLocal() as db:
-        # Load ingredients and their current prices
-        balances = list_inventory_balances(db)
-        ing_prices = {b.item_name: b.weighted_average_price for b in balances if b.item_type == "Ингредиент"}
+        # Load available stock batches for ingredients
+        available_batches = list_available_stock_batches(db)
+        ing_batches = [b for b in available_batches if b.item_type == PurchaseItemType.INGREDIENT]
         
-        all_ingredients = {i.name: i for i in db.query(Ingredient).all()}
+        batch_options = {
+            f"{b.date} - {b.item_name} (Остаток: {b.current_quantity} {b.unit_short_name})": b 
+            for b in ing_batches
+        }
+        
+        all_ingredients = {i.id: i for i in db.query(Ingredient).all()}
         all_units = {u.short_name: u for u in db.query(Unit).all()}
         
-        if not all_ingredients:
-            st.warning("Сначала добавьте ингредиенты в Справочниках")
+        if not ing_batches:
+            st.warning("На складе нет доступных ингредиентов. Сначала оформите закупки.")
         else:
             with st.form("new_prep_form"):
                 col1, col2, col3 = st.columns(3)
@@ -110,34 +116,30 @@ with tabs[1]:
                 ingredient_uses = []
                 for i in range(5):
                     st.markdown(f"**Ингредиент {i+1}**")
-                    ca, cb, cc, cd = st.columns([3, 1, 2, 2])
+                    ca, cb, cc, cd = st.columns([4, 1, 2, 2])
                     with ca:
-                        ing_name = st.selectbox(f"Выбор ингредиента {i}", options=[""] + list(all_ingredients.keys()), key=f"ing_name_{i}")
+                        batch_label = st.selectbox(f"Выбор партии {i}", options=[""] + list(batch_options.keys()), key=f"batch_label_{i}")
                     
-                    # Try to pre-fill unit and price if ingredient is selected
-                    default_unit = ""
-                    default_price = 0.0
-                    if ing_name:
-                        ing_obj = all_ingredients[ing_name]
-                        default_unit = ing_obj.unit.short_name
-                        default_price = float(ing_prices.get(ing_name, 0))
+                    selected_batch = batch_options.get(batch_label)
+                    
+                    default_unit = selected_batch.unit_short_name if selected_batch else ""
+                    default_price = float(selected_batch.unit_price) if selected_batch else 0.0
                     
                     with cb:
                         u_name = st.selectbox(f"Ед {i}", options=list(all_units.keys()), index=list(all_units.keys()).index(default_unit) if default_unit in all_units else 0, key=f"ing_unit_{i}")
                     with cc:
                         qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"ing_qty_{i}")
                     with cd:
-                        # Price is now pulled automatically and shown as information
-                        st.write(f"Цена за ед:")
+                        st.write(f"Цена:")
                         st.info(f"{default_price:,.2f}")
-                        price = default_price
                     
-                    if ing_name and qty > 0:
+                    if selected_batch and qty > 0:
                         ingredient_uses.append(PreparationIngredientInput(
-                            ingredient=all_ingredients[ing_name],
+                            ingredient=all_ingredients[selected_batch.item_id],
                             unit=all_units[u_name],
                             quantity=Decimal(str(qty)),
-                            unit_cost=Decimal(str(price))
+                            unit_cost=Decimal(str(default_price)),
+                            purchase_item_id=selected_batch.batch_id
                         ))
                 
                 submitted = st.form_submit_button("Сохранить заготовку")
@@ -159,7 +161,8 @@ with tabs[1]:
                                         ingredient=db_write.merge(use.ingredient),
                                         unit=db_write.merge(use.unit),
                                         quantity=use.quantity,
-                                        unit_cost=use.unit_cost
+                                        unit_cost=use.unit_cost,
+                                        purchase_item_id=use.purchase_item_id
                                     ))
                                 
                                 create_preparation(

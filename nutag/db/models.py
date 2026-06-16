@@ -234,6 +234,7 @@ class PreparationIngredientUse(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     preparation_id: Mapped[int] = mapped_column(ForeignKey("preparations.id"), nullable=False)
     ingredient_id: Mapped[int] = mapped_column(ForeignKey("ingredients.id"), nullable=False)
+    purchase_item_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_items.id"))
     unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
@@ -242,6 +243,7 @@ class PreparationIngredientUse(Base, TimestampMixin):
 
     preparation: Mapped[Preparation] = relationship(back_populates="ingredient_uses")
     ingredient: Mapped[Ingredient] = relationship()
+    purchase_item: Mapped[PurchaseItem | None] = relationship()
     unit: Mapped[Unit] = relationship()
 
 
@@ -293,6 +295,7 @@ class BatchIngredientUse(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     batch_id: Mapped[int] = mapped_column(ForeignKey("production_batches.id"), nullable=False)
     ingredient_id: Mapped[int] = mapped_column(ForeignKey("ingredients.id"), nullable=False)
+    purchase_item_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_items.id"))
     unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
@@ -301,6 +304,7 @@ class BatchIngredientUse(Base, TimestampMixin):
 
     batch: Mapped[ProductionBatch] = relationship(back_populates="ingredient_uses")
     ingredient: Mapped[Ingredient] = relationship()
+    purchase_item: Mapped[PurchaseItem | None] = relationship()
     unit: Mapped[Unit] = relationship()
 
 
@@ -312,6 +316,7 @@ class BatchPreparationUse(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     batch_id: Mapped[int] = mapped_column(ForeignKey("production_batches.id"), nullable=False)
     preparation_id: Mapped[int] = mapped_column(ForeignKey("preparations.id"), nullable=False)
+    source_preparation_id: Mapped[int | None] = mapped_column(ForeignKey("preparations.id"))
     unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
@@ -319,7 +324,8 @@ class BatchPreparationUse(Base, TimestampMixin):
     comment: Mapped[str | None] = mapped_column(Text)
 
     batch: Mapped[ProductionBatch] = relationship(back_populates="preparation_uses")
-    preparation: Mapped[Preparation] = relationship()
+    preparation: Mapped[Preparation] = relationship(foreign_keys=[preparation_id])
+    source_preparation: Mapped[Preparation | None] = relationship(foreign_keys=[source_preparation_id])
     unit: Mapped[Unit] = relationship()
 
 
@@ -331,6 +337,7 @@ class BatchPackagingUse(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True)
     batch_id: Mapped[int] = mapped_column(ForeignKey("production_batches.id"), nullable=False)
     packaging_id: Mapped[int] = mapped_column(ForeignKey("packaging.id"), nullable=False)
+    purchase_item_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_items.id"))
     unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
@@ -339,6 +346,7 @@ class BatchPackagingUse(Base, TimestampMixin):
 
     batch: Mapped[ProductionBatch] = relationship(back_populates="packaging_uses")
     packaging: Mapped[Packaging] = relationship()
+    purchase_item: Mapped[PurchaseItem | None] = relationship()
     unit: Mapped[Unit] = relationship()
 
 

@@ -8,6 +8,8 @@ from nutag.db.models import Unit, Ingredient, Product, Packaging, Consumable, Eq
 from nutag.db.session import create_engine_for_url, create_session_factory
 
 
+from nutag.services.maintenance import reset_operational_data
+
 st.set_page_config(page_title="Справочники | Nutag", page_icon="📖", layout="wide")
 
 st.title("📖 Справочники")
@@ -25,7 +27,17 @@ def get_db():
         db.close()
 
 
-tabs = st.tabs(["Единицы измерения", "Ингредиенты", "Продукты", "Упаковка", "Расходники", "Оборудование", "Постоянные расходы", "Стоимость труда"])
+tabs = st.tabs([
+    "Единицы измерения", 
+    "Ингредиенты", 
+    "Продукты", 
+    "Упаковка", 
+    "Расходники", 
+    "Оборудование", 
+    "Постоянные расходы", 
+    "Стоимость труда",
+    "⚙️ Обслуживание"
+])
 
 # --- Units Tab ---
 with tabs[0]:
@@ -337,3 +349,34 @@ with tabs[7]:
         st.metric("Текущая ставка", f"{current_rate.hourly_rate:,.2f} / час")
     else:
         st.warning("Ставка не установлена")
+
+# --- Maintenance Tab ---
+with tabs[8]:
+    st.header("⚙️ Обслуживание системы")
+    st.warning("Внимание! Действия в этом разделе необратимы.")
+    
+    st.subheader("Очистка операционных данных")
+    st.write("""
+        Эта функция удалит все транзакционные данные:
+        - Историю закупок и текущие остатки
+        - Все записи о заготовках
+        - Все производственные партии и фасовку
+        - Все заказы клиентов
+        
+        **Справочники (единицы, ингредиенты, продукты, оборудование) останутся нетронутыми.**
+    """)
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        confirm_text = st.text_input("Введите слово 'УДАЛИТЬ' для подтверждения", key="reset_confirm")
+    
+    if st.button("Сбросить все данные", type="primary", disabled=(confirm_text != "УДАЛИТЬ")):
+        try:
+            with SessionLocal() as db:
+                reset_operational_data(db)
+                st.success("Все операционные данные успешно удалены. Система готова к работе с чистого листа.")
+                st.balloons()
+                # We don't rerun immediately to let user see success message, 
+                # but any navigation will show empty lists.
+        except Exception as e:
+            st.error(f"Ошибка при очистке данных: {e}")

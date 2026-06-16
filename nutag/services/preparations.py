@@ -22,6 +22,7 @@ class PreparationIngredientInput:
     unit: Unit
     quantity: Decimal | int | float | str
     unit_cost: Decimal | int | float | str
+    purchase_item_id: int | None = None
     comment: str | None = None
 
 
@@ -94,6 +95,7 @@ def create_preparation(
             PreparationIngredientUse(
                 ingredient=line.ingredient,
                 unit=line.unit,
+                purchase_item_id=line.purchase_item_id,
                 quantity=to_decimal(line.quantity),
                 unit_cost=to_decimal(line.unit_cost),
                 total_cost=line_total,

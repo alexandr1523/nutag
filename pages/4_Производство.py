@@ -8,7 +8,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 from nutag.db.models import Ingredient, Product, Unit, Preparation, LaborRate, Equipment, Packaging, PurchaseItemType
 from nutag.db.session import create_engine_for_url, create_session_factory
-from nutag.services.inventory import list_inventory_balances, ExtendedItemType
+from nutag.services.inventory import list_available_stock_batches, ExtendedItemType
 from nutag.services.preparations import list_preparations
 from nutag.services.production import (
     create_production_batch,
@@ -63,11 +63,14 @@ with tabs[0]:
                     st.subheader("Затраты")
                     uses_data = []
                     for use in b.ingredient_uses:
-                        uses_data.append({"Тип": "Ингредиент", "Наименование": use.ingredient.name, "Кол-во": use.quantity, "Ед": use.unit.short_name, "Цена": use.unit_cost, "Итого": use.total_cost})
+                        source_info = f" (Партия #{use.purchase_item_id})" if use.purchase_item_id else ""
+                        uses_data.append({"Тип": "Ингредиент", "Наименование": use.ingredient.name + source_info, "Кол-во": use.quantity, "Ед": use.unit.short_name, "Цена": use.unit_cost, "Итого": use.total_cost})
                     for use in b.preparation_uses:
-                        uses_data.append({"Тип": "Заготовка", "Наименование": use.preparation.name, "Кол-во": use.quantity, "Ед": use.unit.short_name, "Цена": use.unit_cost, "Итого": use.total_cost})
+                        source_info = f" (Заготовка #{use.source_preparation_id})" if use.source_preparation_id else ""
+                        uses_data.append({"Тип": "Заготовка", "Наименование": use.preparation.name + source_info, "Кол-во": use.quantity, "Ед": use.unit.short_name, "Цена": use.unit_cost, "Итого": use.total_cost})
                     for use in b.packaging_uses:
-                        uses_data.append({"Тип": "Упаковка", "Наименование": use.packaging.name, "Кол-во": use.quantity, "Ед": use.unit.short_name, "Цена": use.unit_cost, "Итого": use.total_cost})
+                        source_info = f" (Партия #{use.purchase_item_id})" if use.purchase_item_id else ""
+                        uses_data.append({"Тип": "Упаковка", "Наименование": use.packaging.name + source_info, "Кол-во": use.quantity, "Ед": use.unit.short_name, "Цена": use.unit_cost, "Итого": use.total_cost})
                     st.table(uses_data)
         else:
             st.info("История партий пуста")
@@ -77,18 +80,24 @@ with tabs[1]:
     st.header("Новая партия")
     
     with SessionLocal() as db:
-        # Load directories and prices
-        balances = list_inventory_balances(db)
+        # Load available stock batches
+        available_batches = list_available_stock_batches(db)
         
-        # Mapping for easy lookup
-        stock_map = { (b.item_type, b.item_name): b for b in balances }
+        ing_batch_options = {
+            f"{b.date} - {b.item_name} (Остаток: {b.current_quantity} {b.unit_short_name})": b 
+            for b in available_batches if b.item_type == PurchaseItemType.INGREDIENT
+        }
+        prep_batch_options = {
+            f"{b.date} - {b.item_name} (Остаток: {b.current_quantity} {b.unit_short_name})": b 
+            for b in available_batches if b.item_type == ExtendedItemType.PREPARATION
+        }
+        pkg_batch_options = {
+            f"{b.date} - {b.item_name} (Остаток: {b.current_quantity} {b.unit_short_name})": b 
+            for b in available_batches if b.item_type == PurchaseItemType.PACKAGING
+        }
         
-        ing_prices = {b.item_name: b.weighted_average_price for b in balances if b.item_type == PurchaseItemType.INGREDIENT}
-        pkg_prices = {b.item_name: b.weighted_average_price for b in balances if b.item_type == PurchaseItemType.PACKAGING}
-        prep_prices = {b.item_name: b.weighted_average_price for b in balances if b.item_type == ExtendedItemType.PREPARATION}
-        
-        all_ingredients = {i.name: i for i in db.query(Ingredient).all()}
-        all_packaging = {p.name: p for p in db.query(Packaging).all()}
+        all_ingredients = {i.id: i for i in db.query(Ingredient).all()}
+        all_packaging = {p.id: p for p in db.query(Packaging).all()}
         all_products = {p.name: p for p in db.query(Product).all()}
         all_units = {u.short_name: u for u in db.query(Unit).all()}
         all_equipment = {e.name: e for e in db.query(Equipment).all()}
@@ -97,7 +106,7 @@ with tabs[1]:
         labor_rate_val = float(current_labor_rate.hourly_rate) if current_labor_rate else 0.0
 
         preps_db = list_preparations(db)
-        prep_objs = {p.name: p for p in preps_db}
+        prep_objs = {p.id: p for p in preps_db}
         
         if not all_products:
             st.warning("Сначала добавьте продукты в Справочниках")
@@ -138,71 +147,89 @@ with tabs[1]:
                 st.subheader("Ингредиенты (до 3)")
                 ing_uses = []
                 for i in range(3):
-                    ca, cb, cc, cd = st.columns([3, 1, 2, 2])
+                    ca, cb, cc, cd = st.columns([4, 1, 2, 2])
                     with ca:
-                        i_name = st.selectbox(f"Ингредиент {i}", options=[""] + list(all_ingredients.keys()), key=f"bi_name_{i}")
+                        i_batch_label = st.selectbox(f"Выбор партии ингредиента {i}", options=[""] + list(ing_batch_options.keys()), key=f"bi_batch_{i}")
                     
-                    def_unit = all_ingredients[i_name].unit.short_name if i_name else ""
-                    def_price = float(ing_prices.get(i_name, 0)) if i_name else 0.0
-                    curr_stock = stock_map.get((PurchaseItemType.INGREDIENT, i_name)).current_quantity if (PurchaseItemType.INGREDIENT, i_name) in stock_map else Decimal("0")
+                    selected_i_batch = ing_batch_options.get(i_batch_label)
+                    def_unit = selected_i_batch.unit_short_name if selected_i_batch else ""
+                    def_price = float(selected_i_batch.unit_price) if selected_i_batch else 0.0
                     
                     with cb:
                         u_name = st.selectbox(f"Ед и {i}", options=list(all_units.keys()), index=list(all_units.keys()).index(def_unit) if def_unit in all_units else 0, key=f"bi_unit_{i}")
                     with cc:
                         qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"bi_qty_{i}")
-                        st.caption(f"Остаток: {curr_stock:,.2f}")
                     with cd:
                         st.write(f"Цена:")
                         st.info(f"{def_price:,.2f}")
                     
-                    if i_name and qty > 0:
-                        ing_uses.append(BatchIngredientInput(ingredient=all_ingredients[i_name], unit=all_units[u_name], quantity=Decimal(str(qty)), unit_cost=Decimal(str(def_price))))
+                    if selected_i_batch and qty > 0:
+                        ing_uses.append(BatchIngredientInput(
+                            ingredient=all_ingredients[selected_i_batch.item_id], 
+                            unit=all_units[u_name], 
+                            quantity=Decimal(str(qty)), 
+                            unit_cost=Decimal(str(def_price)),
+                            purchase_item_id=selected_i_batch.batch_id
+                        ))
 
                 st.subheader("Заготовки (до 3)")
                 p_uses = []
                 for i in range(3):
-                    ca, cb, cc, cd = st.columns([3, 1, 2, 2])
+                    ca, cb, cc, cd = st.columns([4, 1, 2, 2])
                     with ca:
-                        p_name_val = st.selectbox(f"Заготовка {i}", options=[""] + list(prep_objs.keys()), key=f"bp_name_{i}")
+                        p_batch_label = st.selectbox(f"Выбор заготовки {i}", options=[""] + list(prep_batch_options.keys()), key=f"bp_batch_{i}")
                     
-                    def_unit = prep_objs[p_name_val].output_unit.short_name if p_name_val else ""
-                    def_price = float(prep_prices.get(p_name_val, 0)) if p_name_val else 0.0
-                    curr_stock = stock_map.get((ExtendedItemType.PREPARATION, p_name_val)).current_quantity if (ExtendedItemType.PREPARATION, p_name_val) in stock_map else Decimal("0")
+                    selected_p_batch = prep_batch_options.get(p_batch_label)
+                    def_unit = selected_p_batch.unit_short_name if selected_p_batch else ""
+                    def_price = float(selected_p_batch.unit_price) if selected_p_batch else 0.0
                     
                     with cb:
                         u_name = st.selectbox(f"Ед з {i}", options=list(all_units.keys()), index=list(all_units.keys()).index(def_unit) if def_unit in all_units else 0, key=f"bp_unit_{i}")
                     with cc:
                         qty = st.number_input(f"Кол-во з {i}", min_value=0.0, step=0.1, format="%.3f", key=f"bp_qty_{i}")
-                        st.caption(f"Остаток: {curr_stock:,.2f}")
                     with cd:
                         st.write(f"Цена:")
                         st.info(f"{def_price:,.2f}")
                     
-                    if p_name_val and qty > 0:
-                        p_uses.append(BatchPreparationInput(preparation=prep_objs[p_name_val], unit=all_units[u_name], quantity=Decimal(str(qty)), unit_cost=Decimal(str(def_price))))
+                    if selected_p_batch and qty > 0:
+                        # Find the actual preparation object
+                        prep_obj = prep_objs.get(selected_p_batch.batch_id)
+                        if prep_obj:
+                            p_uses.append(BatchPreparationInput(
+                                preparation=prep_obj, 
+                                unit=all_units[u_name], 
+                                quantity=Decimal(str(qty)), 
+                                unit_cost=Decimal(str(def_price)),
+                                source_preparation_id=selected_p_batch.batch_id
+                            ))
 
                 st.subheader("Упаковка (до 2)")
                 pkg_uses = []
                 for i in range(2):
-                    ca, cb, cc, cd = st.columns([3, 1, 2, 2])
+                    ca, cb, cc, cd = st.columns([4, 1, 2, 2])
                     with ca:
-                        pk_name = st.selectbox(f"Упаковка {i}", options=[""] + list(all_packaging.keys()), key=f"bpk_name_{i}")
+                        pk_batch_label = st.selectbox(f"Выбор партии упаковки {i}", options=[""] + list(pkg_batch_options.keys()), key=f"bpk_batch_{i}")
                     
-                    def_unit = all_packaging[pk_name].unit.short_name if pk_name else ""
-                    def_price = float(pkg_prices.get(pk_name, 0)) if pk_name else 0.0
-                    curr_stock = stock_map.get((PurchaseItemType.PACKAGING, pk_name)).current_quantity if (PurchaseItemType.PACKAGING, pk_name) in stock_map else Decimal("0")
+                    selected_pk_batch = pkg_batch_options.get(pk_batch_label)
+                    def_unit = selected_pk_batch.unit_short_name if selected_pk_batch else ""
+                    def_price = float(selected_pk_batch.unit_price) if selected_pk_batch else 0.0
                     
                     with cb:
                         u_name = st.selectbox(f"Ед уп {i}", options=list(all_units.keys()), index=list(all_units.keys()).index(def_unit) if def_unit in all_units else 0, key=f"bpk_unit_{i}")
                     with cc:
                         qty = st.number_input(f"Кол-во уп {i}", min_value=0.0, step=1.0, format="%.0f", key=f"bpk_qty_{i}")
-                        st.caption(f"Остаток: {curr_stock:,.0f}")
                     with cd:
                         st.write(f"Цена:")
                         st.info(f"{def_price:,.2f}")
                     
-                    if pk_name and qty > 0:
-                        pkg_uses.append(BatchPackagingInput(packaging=all_packaging[pk_name], unit=all_units[u_name], quantity=Decimal(str(qty)), unit_cost=Decimal(str(def_price))))
+                    if selected_pk_batch and qty > 0:
+                        pkg_uses.append(BatchPackagingInput(
+                            packaging=all_packaging[selected_pk_batch.item_id], 
+                            unit=all_units[u_name], 
+                            quantity=Decimal(str(qty)), 
+                            unit_cost=Decimal(str(def_price)),
+                            purchase_item_id=selected_pk_batch.batch_id
+                        ))
 
                 st.subheader("Фасовка ГП (до 2)")
                 out_inputs = []
@@ -220,28 +247,7 @@ with tabs[1]:
 
                 submitted = st.form_submit_button("Сохранить партию")
                 if submitted:
-                    # Stock validation
-                    errors = []
-                    for use in ing_uses:
-                        b = stock_map.get((PurchaseItemType.INGREDIENT, use.ingredient.name))
-                        curr = b.current_quantity if b else Decimal("0")
-                        if use.quantity > curr:
-                            errors.append(f"Недостаточно ингредиента {use.ingredient.name} (нужно {use.quantity}, есть {curr})")
-                    for use in p_uses:
-                        b = stock_map.get((ExtendedItemType.PREPARATION, use.preparation.name))
-                        curr = b.current_quantity if b else Decimal("0")
-                        if use.quantity > curr:
-                            errors.append(f"Недостаточно заготовки {use.preparation.name} (нужно {use.quantity}, есть {curr})")
-                    for use in pkg_uses:
-                        b = stock_map.get((PurchaseItemType.PACKAGING, use.packaging.name))
-                        curr = b.current_quantity if b else Decimal("0")
-                        if use.quantity > curr:
-                            errors.append(f"Недостаточно упаковки {use.packaging.name} (нужно {use.quantity}, есть {curr})")
-                    
-                    if errors:
-                        for err in errors:
-                            st.error(err)
-                    elif actual_qty <= 0:
+                    if actual_qty <= 0:
                         st.error("Фактический выход должен быть больше 0")
                     elif not out_inputs:
                         st.error("Добавьте хотя бы одну строку фасовки")
@@ -252,9 +258,9 @@ with tabs[1]:
                             with SessionLocal() as db_write:
                                 db_prod = db_write.merge(all_products[prod_name])
                                 db_unit = db_write.merge(all_units[out_unit_name])
-                                db_ing_uses = [BatchIngredientInput(ingredient=db_write.merge(u.ingredient), unit=db_write.merge(u.unit), quantity=u.quantity, unit_cost=u.unit_cost) for u in ing_uses]
-                                db_p_uses = [BatchPreparationInput(preparation=db_write.merge(u.preparation), unit=db_write.merge(u.unit), quantity=u.quantity, unit_cost=u.unit_cost) for u in p_uses]
-                                db_pkg_uses = [BatchPackagingInput(packaging=db_write.merge(u.packaging), unit=db_write.merge(u.unit), quantity=u.quantity, unit_cost=u.unit_cost) for u in pkg_uses]
+                                db_ing_uses = [BatchIngredientInput(ingredient=db_write.merge(u.ingredient), unit=db_write.merge(u.unit), quantity=u.quantity, unit_cost=u.unit_cost, purchase_item_id=u.purchase_item_id) for u in ing_uses]
+                                db_p_uses = [BatchPreparationInput(preparation=db_write.merge(u.preparation), unit=db_write.merge(u.unit), quantity=u.quantity, unit_cost=u.unit_cost, source_preparation_id=u.source_preparation_id) for u in p_uses]
+                                db_pkg_uses = [BatchPackagingInput(packaging=db_write.merge(u.packaging), unit=db_write.merge(u.unit), quantity=u.quantity, unit_cost=u.unit_cost, purchase_item_id=u.purchase_item_id) for u in pkg_uses]
                                 db_outputs = [FinishedProductOutputInput(package_size=u.package_size, package_unit=db_write.merge(u.package_unit), package_count=u.package_count) for u in out_inputs]
                                 
                                 create_production_batch(
