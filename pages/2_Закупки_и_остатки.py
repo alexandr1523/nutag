@@ -110,106 +110,141 @@ with tabs[3]:
         if not units:
             st.warning("Сначала добавьте единицы измерения в Справочниках")
         else:
-            with st.form("new_purchase_form"):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    purchase_date = st.date_input("Дата закупки", value=date.today())
-                with col2:
-                    supplier = st.text_input("Поставщик")
-                with col3:
-                    purchased_by = st.text_input("Кто закупил")
+            # Initialize session state for 10 rows if not exists
+            if 'purchase_rows' not in st.session_state:
+                st.session_state.purchase_rows = [
+                    {'type': 'Ингредиент', 'name': '', 'unit': list(units.keys())[0], 'qty': 0.0, 'price_unit': 0.0, 'price_total': 0.0} 
+                    for _ in range(10)
+                ]
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                purchase_date = st.date_input("Дата закупки", value=date.today())
+            with col2:
+                supplier = st.text_input("Поставщик")
+            with col3:
+                purchased_by = st.text_input("Кто закупил")
+            
+            transport_cost = st.number_input("Транспортные расходы", min_value=0.0, step=10.0, format="%.2f")
+            comment = st.text_area("Общий комментарий")
+            
+            st.subheader("Позиции (до 10 за раз в MVP)")
+            
+            def sync_row(idx):
+                st.session_state.purchase_rows[idx]['type'] = st.session_state[f"type_sel_{idx}"]
+                st.session_state.purchase_rows[idx]['unit'] = st.session_state[f"unit_sel_{idx}"]
+                st.session_state.purchase_rows[idx]['qty'] = st.session_state[f"qty_val_{idx}"]
+                st.session_state.purchase_rows[idx]['price_unit'] = st.session_state[f"price_unit_val_{idx}"]
+                st.session_state.purchase_rows[idx]['price_total'] = st.session_state[f"price_total_val_{idx}"]
                 
-                transport_cost = st.number_input("Транспортные расходы", min_value=0.0, step=10.0, format="%.2f")
-                comment = st.text_area("Общий комментарий")
+                # Sync name based on widget type
+                if st.session_state.purchase_rows[idx]['type'] == "Ингредиент":
+                    st.session_state.purchase_rows[idx]['name'] = st.session_state.get(f"name_sel_{idx}", "")
+                elif st.session_state.purchase_rows[idx]['type'] == "Упаковка":
+                    st.session_state.purchase_rows[idx]['name'] = st.session_state.get(f"name_sel_pkg_{idx}", "")
+                elif st.session_state.purchase_rows[idx]['type'] == "Расходник":
+                    st.session_state.purchase_rows[idx]['name'] = st.session_state.get(f"name_sel_cons_{idx}", "")
+                else:
+                    st.session_state.purchase_rows[idx]['name'] = st.session_state.get(f"name_txt_{idx}", "")
+
+            def update_total(idx):
+                sync_row(idx)
+                row = st.session_state.purchase_rows[idx]
+                st.session_state.purchase_rows[idx]['price_total'] = float(round(Decimal(str(row['qty'])) * Decimal(str(row['price_unit'])), 2))
+
+            def update_unit(idx):
+                sync_row(idx)
+                row = st.session_state.purchase_rows[idx]
+                if row['qty'] > 0:
+                    st.session_state.purchase_rows[idx]['price_unit'] = float(round(Decimal(str(row['price_total'])) / Decimal(str(row['qty'])), 2))
+
+            for i in range(10):
+                st.markdown(f"**Позиция {i+1}**")
+                c1, c2, c3, c4, c5, c6 = st.columns([2, 3, 1, 1, 2, 2])
                 
-                st.subheader("Позиции (до 10 за раз в MVP)")
+                row = st.session_state.purchase_rows[i]
+                
+                with c1:
+                    st.selectbox(
+                        f"Тип {i}", 
+                        options=[t.value for t in PurchaseItemType], 
+                        index=[t.value for t in PurchaseItemType].index(row['type']),
+                        key=f"type_sel_{i}",
+                        on_change=sync_row, args=(i,)
+                    )
+                with c2:
+                    if row['type'] == "Ингредиент":
+                        name_options = [""] + list(ingredients.keys())
+                        st.selectbox(f"Ингредиент {i}", options=name_options, index=name_options.index(row['name']) if row['name'] in name_options else 0, key=f"name_sel_{i}", on_change=sync_row, args=(i,))
+                    elif row['type'] == "Упаковка":
+                        name_options = [""] + list(packaging.keys())
+                        st.selectbox(f"Упаковка {i}", options=name_options, index=name_options.index(row['name']) if row['name'] in name_options else 0, key=f"name_sel_pkg_{i}", on_change=sync_row, args=(i,))
+                    elif row['type'] == "Расходник":
+                        name_options = [""] + list(consumables.keys())
+                        st.selectbox(f"Расходник {i}", options=name_options, index=name_options.index(row['name']) if row['name'] in name_options else 0, key=f"name_sel_cons_{i}", on_change=sync_row, args=(i,))
+                    else:
+                        st.text_input(f"Наименование {i}", value=row['name'], key=f"name_txt_{i}", on_change=sync_row, args=(i,))
+                
+                with c3:
+                    st.selectbox(f"Ед {i}", options=list(units.keys()), index=list(units.keys()).index(row['unit']) if row['unit'] in units else 0, key=f"unit_sel_{i}", on_change=sync_row, args=(i,))
+                with c4:
+                    st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", value=row['qty'], key=f"qty_val_{i}", on_change=update_total, args=(i,))
+                with c5:
+                    st.number_input(f"Цена/ед {i}", min_value=0.0, step=1.0, format="%.2f", value=row['price_unit'], key=f"price_unit_val_{i}", on_change=update_total, args=(i,))
+                with c6:
+                    st.number_input(f"Итого {i}", min_value=0.0, step=1.0, format="%.2f", value=row['price_total'], key=f"price_total_val_{i}", on_change=update_unit, args=(i,))
+
+            if st.button("Сохранить закупку", type="primary"):
                 lines = []
-                for i in range(10):
-                    st.markdown(f"**Позиция {i+1}**")
-                    c1, c2, c3, c4, c5, c6 = st.columns([2, 3, 1, 1, 2, 2])
-                    with c1:
-                        item_type_val = st.selectbox(
-                            f"Тип {i}", 
-                            options=[t.value for t in PurchaseItemType], 
-                            key=f"type_{i}"
-                        )
-                    with c2:
-                        # Depending on type, show different options
-                        if item_type_val == PurchaseItemType.INGREDIENT:
-                            name_options = list(ingredients.keys())
-                            item_name = st.selectbox(f"Ингредиент {i}", options=[""] + name_options, key=f"name_{i}")
-                        elif item_type_val == PurchaseItemType.PACKAGING:
-                            name_options = list(packaging.keys())
-                            item_name = st.selectbox(f"Упаковка {i}", options=[""] + name_options, key=f"name_{i}")
-                        elif item_type_val == PurchaseItemType.CONSUMABLE:
-                            name_options = list(consumables.keys())
-                            item_name = st.selectbox(f"Расходник {i}", options=[""] + name_options, key=f"name_{i}")
-                        else:
-                            item_name = st.text_input(f"Наименование {i}", key=f"name_{i}")
-                    
-                    with c3:
-                        unit_short = st.selectbox(f"Ед {i}", options=list(units.keys()), key=f"unit_{i}")
-                    with c4:
-                        qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"qty_{i}")
-                    with c5:
-                        price_unit = st.number_input(f"Цена/ед {i}", min_value=0.0, step=1.0, format="%.2f", key=f"price_unit_{i}")
-                    with c6:
-                        price_total = st.number_input(f"Итого {i}", min_value=0.0, step=1.0, format="%.2f", key=f"price_total_{i}")
-                    
-                    if item_name and qty > 0:
-                        # Logic: if price_total is provided and price_unit is 0, calculate price_unit.
-                        # If both are provided, price_unit takes priority or we can validate.
-                        final_price_unit = Decimal(str(price_unit))
-                        if final_price_unit == 0 and price_total > 0:
-                            final_price_unit = Decimal(str(price_total)) / Decimal(str(qty))
-                        
-                        ing = ingredients.get(item_name) if item_type_val == PurchaseItemType.INGREDIENT else None
-                        pkg = packaging.get(item_name) if item_type_val == PurchaseItemType.PACKAGING else None
-                        cons = consumables.get(item_name) if item_type_val == PurchaseItemType.CONSUMABLE else None
+                for r in st.session_state.purchase_rows:
+                    if r['name'] and r['qty'] > 0:
+                        ing = ingredients.get(r['name']) if r['type'] == "Ингредиент" else None
+                        pkg = packaging.get(r['name']) if r['type'] == "Упаковка" else None
+                        cons = consumables.get(r['name']) if r['type'] == "Расходник" else None
                         
                         lines.append(PurchaseLineInput(
-                            item_type=PurchaseItemType(item_type_val),
-                            item_name=item_name,
-                            unit=units[unit_short],
-                            quantity=Decimal(str(qty)),
-                            unit_price=final_price_unit,
+                            item_type=PurchaseItemType(r['type']),
+                            item_name=r['name'],
+                            unit=units[r['unit']],
+                            quantity=Decimal(str(r['qty'])),
+                            unit_price=Decimal(str(r['price_unit'])),
                             ingredient=ing,
                             packaging=pkg,
                             consumable=cons
                         ))
-                
-                submitted = st.form_submit_button("Сохранить закупку")
-                if submitted:
-                    if not lines:
-                        st.error("Добавьте хотя бы одну позицию с количеством > 0")
-                    else:
-                        try:
-                            with SessionLocal() as db_write:
-                                # Re-fetch objects for the new session
-                                db_lines = []
-                                for line in lines:
-                                    db_lines.append(PurchaseLineInput(
-                                        item_type=line.item_type,
-                                        item_name=line.item_name,
-                                        unit=db_write.merge(line.unit),
-                                        quantity=line.quantity,
-                                        unit_price=line.unit_price,
-                                        ingredient=db_write.merge(line.ingredient) if line.ingredient else None,
-                                        packaging=db_write.merge(line.packaging) if line.packaging else None,
-                                        consumable=db_write.merge(line.consumable) if line.consumable else None
-                                    ))
-                                
-                                create_purchase(
-                                    db_write,
-                                    purchase_date=purchase_date,
-                                    lines=db_lines,
-                                    supplier=supplier,
-                                    purchased_by=purchased_by,
-                                    transport_cost=Decimal(str(transport_cost)),
-                                    comment=comment
-                                )
-                                db_write.commit()
-                                st.success("Закупка успешно сохранена!")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"Ошибка при сохранении: {e}")
+
+                if not lines:
+                    st.error("Добавьте хотя бы одну позицию с количеством > 0")
+                else:
+                    try:
+                        with SessionLocal() as db_write:
+                            db_lines = []
+                            for line in lines:
+                                db_lines.append(PurchaseLineInput(
+                                    item_type=line.item_type,
+                                    item_name=line.item_name,
+                                    unit=db_write.merge(line.unit),
+                                    quantity=line.quantity,
+                                    unit_price=line.unit_price,
+                                    ingredient=db_write.merge(line.ingredient) if line.ingredient else None,
+                                    packaging=db_write.merge(line.packaging) if line.packaging else None,
+                                    consumable=db_write.merge(line.consumable) if line.consumable else None
+                                ))
+                            
+                            create_purchase(
+                                db_write,
+                                purchase_date=purchase_date,
+                                lines=db_lines,
+                                supplier=supplier,
+                                purchased_by=purchased_by,
+                                transport_cost=Decimal(str(transport_cost)),
+                                comment=comment
+                            )
+                            db_write.commit()
+                            # Clear state after success
+                            if 'purchase_rows' in st.session_state:
+                                del st.session_state.purchase_rows
+                            st.success("Закупка успешно сохранена!")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Ошибка при сохранении: {e}")
