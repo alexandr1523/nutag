@@ -30,11 +30,11 @@ from enum import StrEnum
 
 class ExtendedItemType(StrEnum):
     """Expanded item types for inventory tracking."""
-    INGREDIENT = "ingredient"
-    PACKAGING = "packaging"
-    CONSUMABLE = "consumable"
-    PREPARATION = "preparation"
-    PRODUCT = "product"
+    INGREDIENT = "Ингредиент"
+    PACKAGING = "Упаковка"
+    CONSUMABLE = "Расходник"
+    PREPARATION = "Заготовка"
+    PRODUCT = "Готовый продукт"
 
 @dataclass(frozen=True)
 class InventoryBalance:

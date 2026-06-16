@@ -20,9 +20,9 @@ from nutag.db.base import Base
 class PurchaseItemType(StrEnum):
     """Supported purchase item categories for the first inventory slice."""
 
-    INGREDIENT = "ingredient"
-    PACKAGING = "packaging"
-    CONSUMABLE = "consumable"
+    INGREDIENT = "Ингредиент"
+    PACKAGING = "Упаковка"
+    CONSUMABLE = "Расходник"
 
 
 class TimestampMixin:
@@ -365,30 +365,30 @@ class FinishedProductOutput(Base, TimestampMixin):
 class OrderStatus(StrEnum):
     """Business status of an order."""
 
-    NEW = "new"
-    CONFIRMED = "confirmed"
-    READY = "ready"
-    DELIVERED = "delivered"
-    CANCELLED = "cancelled"
+    NEW = "Новый"
+    CONFIRMED = "Подтвержден"
+    READY = "Готов"
+    DELIVERED = "Выдан"
+    CANCELLED = "Отменен"
 
 
 class PaymentStatus(StrEnum):
     """Payment status for accounting."""
 
-    PENDING = "pending"
-    PAID = "paid"
-    ON_DELIVERY = "on_delivery"
-    REFUNDED = "refunded"
+    PENDING = "Ожидает"
+    PAID = "Оплачен"
+    ON_DELIVERY = "При получении"
+    REFUNDED = "Возврат"
 
 
 class ReservationStatus(StrEnum):
     """Internal stock reservation status."""
 
-    NOT_RESERVED = "not_reserved"
-    IN_PLAN = "in_plan"
-    RESERVED = "reserved"
-    PARTIAL = "partial"
-    RELEASED = "released"
+    NOT_RESERVED = "Не зарезервирован"
+    IN_PLAN = "В плане"
+    RESERVED = "Зарезервирован"
+    PARTIAL = "Частично"
+    RELEASED = "Снят"
 
 
 class Order(Base, TimestampMixin):

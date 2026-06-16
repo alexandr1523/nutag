@@ -62,7 +62,7 @@ with tabs[1]:
     with SessionLocal() as db:
         # Load ingredients and their current prices
         balances = list_inventory_balances(db)
-        ing_prices = {b.item_name: b.weighted_average_price for b in balances if b.item_type == "ingredient"}
+        ing_prices = {b.item_name: b.weighted_average_price for b in balances if b.item_type == "Ингредиент"}
         
         all_ingredients = {i.name: i for i in db.query(Ingredient).all()}
         all_units = {u.short_name: u for u in db.query(Unit).all()}
