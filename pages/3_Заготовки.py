@@ -117,7 +117,7 @@ with tabs[1]:
             ingredient_uses = []
             for i in range(5):
                 st.markdown(f"**Ингредиент {i + 1}**")
-                ca, cb, cc, cd = st.columns([4, 1, 2, 2])
+                ca, cb, cc, cd = st.columns([4, 1, 2, 2.5])
                 with ca:
                     batch_label = st.selectbox(
                         f"Выбор партии {i}",
@@ -136,15 +136,25 @@ with tabs[1]:
                     u_name = st.selectbox(
                         f"Ед {i}",
                         options=list(all_units.keys()),
-                        index=list(all_units.keys()).index(st.session_state.get(f"ing_unit_{i}", default_unit or list(all_units.keys())[0])),
+                        index=list(all_units.keys()).index(
+                            st.session_state.get(f"ing_unit_{i}", default_unit or list(all_units.keys())[0])
+                        ),
                         key=f"ing_unit_{i}",
                         disabled=selected_batch is not None,
                     )
                 with cc:
                     qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"ing_qty_{i}")
                 with cd:
-                    st.write("Цена:")
-                    st.info(f"{default_price:,.2f}")
+                    line_total = Decimal(str(qty)) * Decimal(str(default_price))
+                    st.session_state[f"ing_total_{i}"] = float(line_total)
+                    st.number_input(
+                        f"Стоимость {i}",
+                        min_value=0.0,
+                        step=1.0,
+                        format="%.2f",
+                        key=f"ing_total_{i}",
+                        disabled=True,
+                    )
 
                 if selected_batch and qty > 0:
                     ingredient_uses.append(
