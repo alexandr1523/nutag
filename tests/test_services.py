@@ -9,10 +9,12 @@ from nutag.services.purchases import PurchaseLineInput, calculate_purchase_line_
 from nutag.services.references import (
     create_ingredient,
     create_packaging,
+    create_preparation_type,
     create_product,
     create_unit,
     list_ingredients,
     list_packaging,
+    list_preparation_types,
     list_products,
     list_units,
 )
@@ -31,6 +33,7 @@ def test_reference_services_create_and_list_records() -> None:
         kg = create_unit(session, name="kilogram", short_name="kg")
         piece = create_unit(session, name="piece", short_name="pcs")
         create_product(session, name="Пельмени")
+        create_preparation_type(session, name="Начинка")
         create_ingredient(session, name="Мука", unit=kg)
         create_packaging(session, name="Контейнер 1 кг", unit=piece)
         session.commit()
@@ -38,6 +41,7 @@ def test_reference_services_create_and_list_records() -> None:
     with session_factory() as session:
         assert [unit.short_name for unit in list_units(session)] == ["kg", "pcs"]
         assert [product.name for product in list_products(session)] == ["Пельмени"]
+        assert [preparation_type.name for preparation_type in list_preparation_types(session)] == ["Начинка"]
         assert [ingredient.name for ingredient in list_ingredients(session)] == ["Мука"]
         assert [packaging.name for packaging in list_packaging(session)] == ["Контейнер 1 кг"]
 

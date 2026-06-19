@@ -10,7 +10,7 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from nutag.db.models import Ingredient, Preparation, PreparationIngredientUse, Unit
+from nutag.db.models import Ingredient, Preparation, PreparationIngredientUse, PreparationType, Unit
 from nutag.services.calculations import calculate_preparation_cost, calculate_unit_cost, to_decimal
 
 
@@ -47,7 +47,7 @@ def create_preparation(
     session: Session,
     *,
     prepared_on: date,
-    name: str,
+    preparation_type: PreparationType,
     output_quantity: Decimal | int | float | str,
     waste_quantity: Decimal | int | float | str = 0,
     output_unit: Unit,
@@ -79,7 +79,8 @@ def create_preparation(
 
     preparation = Preparation(
         prepared_on=prepared_on,
-        name=name,
+        preparation_type=preparation_type,
+        name=preparation_type.name,
         output_quantity=output_quantity_decimal,
         waste_quantity=waste_quantity_decimal,
         output_unit=output_unit,

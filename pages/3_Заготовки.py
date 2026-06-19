@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import streamlit as st
 
-from nutag.db.models import Ingredient, LaborRate, PurchaseItemType, Unit
+from nutag.db.models import Ingredient, LaborRate, PreparationType, PurchaseItemType, Unit
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.inventory import list_available_stock_batches
 from nutag.services.preparations import PreparationIngredientInput, create_preparation, list_preparations
@@ -17,36 +17,39 @@ st.set_page_config(page_title="Заготовки | Nutag", page_icon="🥣", la
 
 st.title("🥣 Заготовки")
 
-# Session management
 engine = create_engine_for_url()
 SessionLocal = create_session_factory(engine)
 
 tabs = st.tabs(["История заготовок", "Новая заготовка"])
 
-# --- History Tab ---
 with tabs[0]:
     st.header("История заготовок")
     with SessionLocal() as db:
-        preps = list_preparations(db)
-        if preps:
-            for p in preps:
-                with st.expander(f"{p.prepared_on} - {p.name} ({p.output_quantity} {p.output_unit.short_name})"):
+        preparations = list_preparations(db)
+        if preparations:
+            for preparation in preparations:
+                preparation_label = preparation.preparation_type.name if preparation.preparation_type else preparation.name
+                with st.expander(
+                    f"{preparation.prepared_on} - {preparation_label} "
+                    f"({preparation.output_quantity} {preparation.output_unit.short_name})"
+                ):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.write(f"**Дата:** {p.prepared_on}")
-                        st.write(f"**Выход:** {p.output_quantity} {p.output_unit.short_name}")
-                        st.write(f"**Отходы:** {p.waste_quantity} {p.output_unit.short_name}")
-                        st.write(f"**Труд:** {p.labor_cost:,.2f}")
-                        st.write(f"**Прочее:** {p.other_direct_cost:,.2f}")
+                        st.write(f"**Дата:** {preparation.prepared_on}")
+                        st.write(f"**Вид заготовки:** {preparation_label}")
+                        st.write(f"**Выход:** {preparation.output_quantity} {preparation.output_unit.short_name}")
+                        st.write(f"**Отходы:** {preparation.waste_quantity} {preparation.output_unit.short_name}")
+                        st.write(f"**Труд:** {preparation.labor_cost:,.2f}")
+                        st.write(f"**Прочее:** {preparation.other_direct_cost:,.2f}")
                     with col2:
-                        st.write(f"**Себестоимость (общая):** {p.total_cost:,.2f}")
-                        st.write(f"**Себестоимость (ед):** {p.unit_cost:,.4f}")
+                        st.write(f"**Себестоимость (общая):** {preparation.total_cost:,.2f}")
+                        st.write(f"**Себестоимость (ед):** {preparation.unit_cost:,.4f}")
 
                     st.subheader("Использованные ингредиенты")
-                    ing_data = []
-                    for use in p.ingredient_uses:
+                    ingredient_rows = []
+                    for use in preparation.ingredient_uses:
                         source_info = f" (Партия #{use.purchase_item_id})" if use.purchase_item_id else ""
-                        ing_data.append(
+                        ingredient_rows.append(
                             {
                                 "Ингредиент": use.ingredient.name + source_info,
                                 "Кол-во": use.quantity,
@@ -55,34 +58,36 @@ with tabs[0]:
                                 "Итого": use.total_cost,
                             }
                         )
-                    st.table(ing_data)
+                    st.table(ingredient_rows)
         else:
             st.info("История заготовок пуста")
 
-# --- New Preparation Tab ---
 with tabs[1]:
     st.header("Новая заготовка")
 
     with SessionLocal() as db:
         available_batches = list_available_stock_batches(db)
-        ing_batches = [b for b in available_batches if b.item_type == PurchaseItemType.INGREDIENT]
+        ingredient_batches = [batch for batch in available_batches if batch.item_type == PurchaseItemType.INGREDIENT]
+        preparation_types = db.query(PreparationType).order_by(PreparationType.name).all()
 
         batch_options = {
-            f"{b.date} - {b.item_name} (Остаток: {b.current_quantity} {b.unit_short_name})": b
-            for b in ing_batches
+            f"{batch.date} - {batch.item_name} (Остаток: {batch.current_quantity} {batch.unit_short_name})": batch
+            for batch in ingredient_batches
         }
+        preparation_type_options = {preparation_type.name: preparation_type for preparation_type in preparation_types}
+        all_ingredients = {ingredient.id: ingredient for ingredient in db.query(Ingredient).all()}
+        all_units = {unit.short_name: unit for unit in db.query(Unit).all()}
 
-        all_ingredients = {i.id: i for i in db.query(Ingredient).all()}
-        all_units = {u.short_name: u for u in db.query(Unit).all()}
-
-        if not ing_batches:
+        if not preparation_type_options:
+            st.warning("Сначала добавьте виды заготовок в Справочниках.")
+        elif not ingredient_batches:
             st.warning("На складе нет доступных ингредиентов. Сначала оформите закупки.")
         else:
             col1, col2, col3 = st.columns(3)
             with col1:
                 prep_date = st.date_input("Дата приготовления", value=date.today())
             with col2:
-                prep_name = st.text_input("Название (например, Тесто для пельменей)")
+                preparation_type_name = st.selectbox("Вид заготовки", options=list(preparation_type_options.keys()))
             with col3:
                 prep_comment = st.text_area("Комментарий", key="prep_comm")
 
@@ -147,7 +152,7 @@ with tabs[1]:
                     st.session_state[f"ing_unit_{i}"] = default_unit
 
                 with cb:
-                    u_name = st.selectbox(
+                    unit_name = st.selectbox(
                         f"Ед {i}",
                         options=list(all_units.keys()),
                         index=list(all_units.keys()).index(
@@ -174,7 +179,7 @@ with tabs[1]:
                     ingredient_uses.append(
                         PreparationIngredientInput(
                             ingredient=all_ingredients[selected_batch.item_id],
-                            unit=all_units[u_name],
+                            unit=all_units[unit_name],
                             quantity=Decimal(str(qty)),
                             unit_cost=Decimal(str(default_price)),
                             purchase_item_id=selected_batch.batch_id,
@@ -182,9 +187,7 @@ with tabs[1]:
                     )
 
             if st.button("Сохранить заготовку", type="primary"):
-                if not prep_name:
-                    st.error("Укажите название заготовки")
-                elif output_qty <= 0:
+                if output_qty <= 0:
                     st.error("Количество на выходе должно быть больше 0")
                 elif not ingredient_uses:
                     st.error("Добавьте хотя бы один ингредиент")
@@ -192,32 +195,32 @@ with tabs[1]:
                     try:
                         with SessionLocal() as db_write:
                             db_output_unit = db_write.merge(all_units[output_unit_name])
-                            db_ing_uses = []
-                            for use in ingredient_uses:
-                                db_ing_uses.append(
-                                    PreparationIngredientInput(
-                                        ingredient=db_write.merge(use.ingredient),
-                                        unit=db_write.merge(use.unit),
-                                        quantity=use.quantity,
-                                        unit_cost=use.unit_cost,
-                                        purchase_item_id=use.purchase_item_id,
-                                    )
+                            db_preparation_type = db_write.merge(preparation_type_options[preparation_type_name])
+                            db_ingredient_uses = [
+                                PreparationIngredientInput(
+                                    ingredient=db_write.merge(use.ingredient),
+                                    unit=db_write.merge(use.unit),
+                                    quantity=use.quantity,
+                                    unit_cost=use.unit_cost,
+                                    purchase_item_id=use.purchase_item_id,
                                 )
+                                for use in ingredient_uses
+                            ]
 
                             create_preparation(
                                 db_write,
                                 prepared_on=prep_date,
-                                name=prep_name,
+                                preparation_type=db_preparation_type,
                                 output_quantity=Decimal(str(output_qty)),
                                 waste_quantity=Decimal(str(waste_qty)),
                                 output_unit=db_output_unit,
-                                ingredient_uses=db_ing_uses,
+                                ingredient_uses=db_ingredient_uses,
                                 labor_cost=calculated_labor_cost,
                                 other_direct_cost=Decimal(str(other_cost)),
                                 comment=prep_comment,
                             )
                             db_write.commit()
-                            st.success(f"Заготовка '{prep_name}' успешно сохранена!")
+                            st.success(f"Заготовка '{preparation_type_name}' успешно сохранена!")
                             st.rerun()
                     except Exception as e:
                         st.error(f"Ошибка при сохранении: {e}")

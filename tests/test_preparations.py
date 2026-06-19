@@ -10,7 +10,7 @@ from nutag.services.preparations import (
     create_preparation,
     list_preparations,
 )
-from nutag.services.references import create_ingredient, create_unit
+from nutag.services.references import create_ingredient, create_preparation_type, create_unit
 
 
 def make_session_factory():
@@ -36,11 +36,12 @@ def test_create_preparation_calculates_total_and_unit_cost() -> None:
         kg = create_unit(session, name="kilogram", short_name="kg")
         flour = create_ingredient(session, name="Мука", unit=kg)
         meat = create_ingredient(session, name="Фарш", unit=kg)
+        filling = create_preparation_type(session, name="Начинка")
 
         preparation = create_preparation(
             session,
             prepared_on=date(2026, 6, 14),
-            name="Начинка свинина+говядина",
+            preparation_type=filling,
             output_quantity="4",
             output_unit=kg,
             ingredient_uses=[
@@ -67,11 +68,12 @@ def test_create_preparation_rejects_empty_ingredient_uses() -> None:
 
     with session_factory() as session:
         kg = create_unit(session, name="kilogram", short_name="kg")
+        empty_type = create_preparation_type(session, name="Пустая заготовка")
         with pytest.raises(ValueError, match="at least one ingredient use"):
             create_preparation(
                 session,
                 prepared_on=date(2026, 6, 14),
-                name="Пустая заготовка",
+                preparation_type=empty_type,
                 output_quantity="1",
                 output_unit=kg,
                 ingredient_uses=[],
@@ -84,11 +86,12 @@ def test_create_preparation_rejects_zero_output() -> None:
     with session_factory() as session:
         kg = create_unit(session, name="kilogram", short_name="kg")
         flour = create_ingredient(session, name="Мука", unit=kg)
+        empty_type = create_preparation_type(session, name="Пустая заготовка")
         with pytest.raises(ValueError, match="output quantity"):
             create_preparation(
                 session,
                 prepared_on=date(2026, 6, 14),
-                name="Пустая заготовка",
+                preparation_type=empty_type,
                 output_quantity="0",
                 output_unit=kg,
                 ingredient_uses=[PreparationIngredientInput(ingredient=flour, unit=kg, quantity="1", unit_cost="92")],

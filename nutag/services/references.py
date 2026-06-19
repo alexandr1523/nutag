@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from nutag.db.models import Ingredient, Packaging, Product, Unit
+from nutag.db.models import Ingredient, Packaging, PreparationType, Product, Unit
 
 
 def create_unit(session: Session, *, name: str, short_name: str, comment: str | None = None) -> Unit:
@@ -24,6 +24,15 @@ def create_product(session: Session, *, name: str, comment: str | None = None) -
     session.add(product)
     session.flush()
     return product
+
+
+def create_preparation_type(session: Session, *, name: str, comment: str | None = None) -> PreparationType:
+    """Create a preparation type for internal semi-finished products."""
+
+    preparation_type = PreparationType(name=name, comment=comment)
+    session.add(preparation_type)
+    session.flush()
+    return preparation_type
 
 
 def create_ingredient(
@@ -66,6 +75,12 @@ def list_products(session: Session) -> list[Product]:
     """Return products ordered by name."""
 
     return list(session.scalars(select(Product).order_by(Product.name)))
+
+
+def list_preparation_types(session: Session) -> list[PreparationType]:
+    """Return preparation types ordered by name."""
+
+    return list(session.scalars(select(PreparationType).order_by(PreparationType.name)))
 
 
 def list_ingredients(session: Session) -> list[Ingredient]:

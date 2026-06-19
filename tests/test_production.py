@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 
 from nutag.db import create_database, create_engine_for_url, create_session_factory
+from nutag.db.models import PurchaseItemType
 from nutag.services.preparations import PreparationIngredientInput, create_preparation
 from nutag.services.production import (
     BatchIngredientInput,
@@ -14,9 +15,14 @@ from nutag.services.production import (
     create_production_batch,
     list_production_batches,
 )
-from nutag.db.models import PurchaseItemType
 from nutag.services.purchases import PurchaseLineInput, create_purchase
-from nutag.services.references import create_ingredient, create_packaging, create_product, create_unit
+from nutag.services.references import (
+    create_ingredient,
+    create_packaging,
+    create_preparation_type,
+    create_product,
+    create_unit,
+)
 
 
 def make_session_factory():
@@ -43,10 +49,11 @@ def test_create_production_batch_calculates_costs_and_outputs() -> None:
         product = create_product(session, name="Пельмени")
         flour = create_ingredient(session, name="Мука", unit=kg)
         meat = create_ingredient(session, name="Фарш", unit=kg)
+        filling = create_preparation_type(session, name="Начинка")
         preparation = create_preparation(
             session,
             prepared_on=date(2026, 6, 14),
-            name="Начинка",
+            preparation_type=filling,
             output_quantity="4",
             output_unit=kg,
             ingredient_uses=[PreparationIngredientInput(ingredient=meat, unit=kg, quantity="4", unit_cost="450")],
@@ -131,10 +138,11 @@ def test_create_production_batch_persists_selected_source_batch_ids() -> None:
     with session_factory() as session:
         kg = create_unit(session, name="kilogram", short_name="kg")
         piece = create_unit(session, name="piece", short_name="pcs")
-        product = create_product(session, name="ÐŸÐµÐ»ÑŒÐ¼ÐµÐ½Ð¸")
-        flour = create_ingredient(session, name="ÐœÑƒÐºÐ°", unit=kg)
-        meat = create_ingredient(session, name="Ð¤Ð°Ñ€Ñˆ", unit=kg)
-        container = create_packaging(session, name="ÐšÐ¾Ð½Ñ‚ÐµÐ¹Ð½ÐµÑ€", unit=piece)
+        product = create_product(session, name="Пельмени")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        meat = create_ingredient(session, name="Фарш", unit=kg)
+        container = create_packaging(session, name="Контейнер", unit=piece)
+        filling = create_preparation_type(session, name="Начинка")
 
         purchase = create_purchase(
             session,
@@ -163,7 +171,7 @@ def test_create_production_batch_persists_selected_source_batch_ids() -> None:
         preparation = create_preparation(
             session,
             prepared_on=date(2026, 6, 14),
-            name="ÐÐ°Ñ‡Ð¸Ð½ÐºÐ°",
+            preparation_type=filling,
             output_quantity="4",
             output_unit=kg,
             ingredient_uses=[PreparationIngredientInput(ingredient=meat, unit=kg, quantity="4", unit_cost="450")],

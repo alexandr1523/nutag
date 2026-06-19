@@ -62,6 +62,18 @@ class Product(Base, TimestampMixin):
     comment: Mapped[str | None] = mapped_column(Text)
 
 
+class PreparationType(Base, TimestampMixin):
+    """Reference type for internal preparations/semi-finished products."""
+
+    __tablename__ = "preparation_types"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    preparations: Mapped[list[Preparation]] = relationship(back_populates="preparation_type")
+
+
 class Ingredient(Base, TimestampMixin):
     """Raw ingredient used in preparations and production batches."""
 
@@ -209,6 +221,7 @@ class Preparation(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     prepared_on: Mapped[date] = mapped_column(Date, nullable=False)
+    preparation_type_id: Mapped[int | None] = mapped_column(ForeignKey("preparation_types.id"))
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     output_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
     waste_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"), nullable=False)
@@ -219,6 +232,7 @@ class Preparation(Base, TimestampMixin):
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text)
 
+    preparation_type: Mapped[PreparationType | None] = relationship(back_populates="preparations")
     output_unit: Mapped[Unit] = relationship()
     ingredient_uses: Mapped[list[PreparationIngredientUse]] = relationship(
         back_populates="preparation",

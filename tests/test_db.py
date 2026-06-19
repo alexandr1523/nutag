@@ -16,6 +16,7 @@ def test_create_database_creates_initial_tables() -> None:
     assert {
         "units",
         "products",
+        "preparation_types",
         "ingredients",
         "packaging",
         "purchases",
