@@ -1,7 +1,5 @@
 # Nutag Agent Instructions
 
-This file is kept in sync with `AGENTS.md`. If instructions change, update both files together.
-
 ## Environment Constraints
 - Use PowerShell-compatible commands.
 - Do not chain commands with `&&`; use separate commands or PowerShell-safe separators.
