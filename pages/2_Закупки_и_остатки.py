@@ -29,6 +29,25 @@ def make_default_purchase_rows(default_unit: str) -> list[dict[str, object]]:
     ]
 
 
+def get_catalog_unit_name(
+    *,
+    row_type: str,
+    row_name: str,
+    ingredient_units: dict[str, str],
+    packaging_units: dict[str, str],
+    consumable_units: dict[str, str],
+) -> str | None:
+    """Return the fixed unit name from the selected catalog item."""
+
+    if row_type == PurchaseItemType.INGREDIENT.value:
+        return ingredient_units.get(row_name)
+    if row_type == PurchaseItemType.PACKAGING.value:
+        return packaging_units.get(row_name)
+    if row_type == PurchaseItemType.CONSUMABLE.value:
+        return consumable_units.get(row_name)
+    return None
+
+
 st.set_page_config(page_title="Закупки и остатки | Nutag", page_icon="📦", layout="wide")
 
 st.title("📦 Закупки и остатки")
@@ -129,6 +148,9 @@ with tabs[3]:
         ingredients = {i.name: i for i in db.query(Ingredient).all()}
         packaging = {p.name: p for p in db.query(Packaging).all()}
         consumables = {c.name: c for c in db.query(Consumable).all()}
+        ingredient_units = {i.name: i.unit.short_name for i in db.query(Ingredient).all()}
+        packaging_units = {p.name: p.unit.short_name for p in db.query(Packaging).all()}
+        consumable_units = {c.name: c.unit.short_name for c in db.query(Consumable).all()}
         units = {u.short_name: u for u in db.query(Unit).all()}
 
         if not units:
@@ -181,6 +203,17 @@ with tabs[3]:
                 else:
                     st.session_state.purchase_rows[idx]["name"] = st.session_state.get(field_key("name_txt", idx), "")
 
+                fixed_unit = get_catalog_unit_name(
+                    row_type=st.session_state.purchase_rows[idx]["type"],
+                    row_name=st.session_state.purchase_rows[idx]["name"],
+                    ingredient_units=ingredient_units,
+                    packaging_units=packaging_units,
+                    consumable_units=consumable_units,
+                )
+                if fixed_unit:
+                    st.session_state.purchase_rows[idx]["unit"] = fixed_unit
+                    st.session_state[field_key("unit_sel", idx)] = fixed_unit
+
             def update_total(idx: int) -> None:
                 sync_row(idx)
                 row = st.session_state.purchase_rows[idx]
@@ -203,6 +236,17 @@ with tabs[3]:
                 c1, c2, c3, c4, c5, c6 = st.columns([2, 3, 1, 1, 2, 2])
 
                 row = st.session_state.purchase_rows[i]
+                fixed_unit = get_catalog_unit_name(
+                    row_type=row["type"],
+                    row_name=row["name"],
+                    ingredient_units=ingredient_units,
+                    packaging_units=packaging_units,
+                    consumable_units=consumable_units,
+                )
+                if fixed_unit and row["unit"] != fixed_unit:
+                    row["unit"] = fixed_unit
+                    st.session_state.purchase_rows[i]["unit"] = fixed_unit
+                    st.session_state[field_key("unit_sel", i)] = fixed_unit
 
                 with c1:
                     st.selectbox(
@@ -261,6 +305,7 @@ with tabs[3]:
                         key=field_key("unit_sel", i),
                         on_change=sync_row,
                         args=(i,),
+                        disabled=fixed_unit is not None,
                     )
                 with c4:
                     st.number_input(
