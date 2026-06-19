@@ -104,12 +104,26 @@ with tabs[1]:
             with c3:
                 labor_hours = st.number_input("Время труда (часы)", min_value=0.0, step=0.1, format="%.2f")
             with c4:
-                st.write("Текущая ставка:")
-                st.info(f"{rate_val:,.2f} / час")
+                st.session_state["prep_rate_display"] = rate_val
+                st.number_input(
+                    "Текущая ставка",
+                    min_value=0.0,
+                    step=1.0,
+                    format="%.2f",
+                    key="prep_rate_display",
+                    disabled=True,
+                )
             with c5:
                 calculated_labor_cost = Decimal(str(labor_hours * rate_val))
-                st.write("Итого за труд:")
-                st.success(f"{calculated_labor_cost:,.2f}")
+                st.session_state["prep_labor_total"] = float(calculated_labor_cost)
+                st.number_input(
+                    "Итого за труд",
+                    min_value=0.0,
+                    step=1.0,
+                    format="%.2f",
+                    key="prep_labor_total",
+                    disabled=True,
+                )
 
             other_cost = st.number_input("Прочие прямые расходы", min_value=0.0, step=10.0, format="%.2f")
 
