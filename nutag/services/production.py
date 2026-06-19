@@ -164,6 +164,7 @@ def create_production_batch(
         batch.ingredient_uses.append(
             BatchIngredientUse(
                 ingredient=line.ingredient,
+                purchase_item_id=line.purchase_item_id,
                 unit=line.unit,
                 quantity=to_decimal(line.quantity),
                 unit_cost=to_decimal(line.unit_cost),
@@ -176,6 +177,7 @@ def create_production_batch(
         batch.preparation_uses.append(
             BatchPreparationUse(
                 preparation=line.preparation,
+                source_preparation_id=line.source_preparation_id,
                 unit=line.unit,
                 quantity=to_decimal(line.quantity),
                 unit_cost=to_decimal(line.unit_cost),
@@ -188,6 +190,7 @@ def create_production_batch(
         batch.packaging_uses.append(
             BatchPackagingUse(
                 packaging=line.packaging,
+                purchase_item_id=line.purchase_item_id,
                 unit=line.unit,
                 quantity=to_decimal(line.quantity),
                 unit_cost=to_decimal(line.unit_cost),
