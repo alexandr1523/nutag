@@ -6,6 +6,7 @@ import streamlit as st
 from decimal import Decimal
 from datetime import date
 from sqlalchemy.orm import Session
+from nutag.db.init_db import initialize_database
 from nutag.db.models import Product, Unit, OrderStatus, PaymentStatus, ReservationStatus
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.orders import create_order, list_orders, OrderItemInput
@@ -17,6 +18,7 @@ st.title("🛍️ Заказы")
 
 # Session management
 engine = create_engine_for_url()
+initialize_database(engine)
 SessionLocal = create_session_factory(engine)
 
 tabs = st.tabs(["Список заказов", "Новый заказ"])

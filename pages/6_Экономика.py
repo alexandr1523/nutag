@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from nutag.db.init_db import initialize_database
 from nutag.db.models import Order, OrderItem, ProductionBatch
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.orders import list_orders
@@ -16,6 +17,7 @@ st.title("📊 Экономика")
 
 # Session management
 engine = create_engine_for_url()
+initialize_database(engine)
 SessionLocal = create_session_factory(engine)
 
 with SessionLocal() as db:

@@ -7,6 +7,7 @@ from decimal import Decimal
 
 import streamlit as st
 
+from nutag.db.init_db import initialize_database
 from nutag.db.models import Equipment, Ingredient, LaborRate, Packaging, Preparation, Product, PurchaseItemType, Unit
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.inventory import ExtendedItemType, list_available_stock_batches
@@ -33,6 +34,7 @@ st.title("🏭 Производство")
 
 # Session management
 engine = create_engine_for_url()
+initialize_database(engine)
 SessionLocal = create_session_factory(engine)
 
 tabs = st.tabs(["История партий", "Новая партия"])

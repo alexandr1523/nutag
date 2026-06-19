@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import logging
 import streamlit as st
-from alembic.config import Config
-from alembic import command
 from nutag.db.session import create_engine_for_url, create_session_factory
-from nutag.db.init_db import create_database
+from nutag.db.init_db import initialize_database
 from nutag.services.validation import get_control_signals
 
 # Configure logging
@@ -21,26 +19,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("nutag.app")
 
-def run_migrations():
-    """Apply alembic migrations programmatically."""
-    try:
-        alembic_cfg = Config("alembic.ini")
-        command.upgrade(alembic_cfg, "head")
-        logger.info("Database migrations applied successfully")
-    except Exception as e:
-        logger.error(f"Failed to apply migrations: {e}")
-        raise
-
 # Page configuration
 st.set_page_config(page_title="Nutag", page_icon="🥟", layout="wide")
 
 try:
     # Database initialization
     engine = create_engine_for_url()
-    # Still run create_database to ensure initial tables for a fresh install
-    # Alembic will handle subsequent updates
-    create_database(engine)
-    run_migrations()
+    initialize_database(engine)
+    logger.info("Database initialized successfully")
     
     SessionLocal = create_session_factory(engine)
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from nutag.db.init_db import initialize_database
 from nutag.db.models import (
     Consumable,
     Equipment,
@@ -25,6 +26,7 @@ st.title("📖 Справочники")
 
 # Session management
 engine = create_engine_for_url()
+initialize_database(engine)
 SessionLocal = create_session_factory(engine)
 
 
