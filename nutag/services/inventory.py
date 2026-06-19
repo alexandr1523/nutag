@@ -152,6 +152,7 @@ def list_available_stock_batches(session: Session) -> list[StockBatch]:
         (BatchIngredientUse, "ingredient", "ingredient_id"),
         (BatchPackagingUse, "packaging", "packaging_id")
     ]:
+        expected_item_type = PurchaseItemType[itype_attr.upper()]
         unlinked = session.query(getattr(model, iid_attr), func.sum(model.quantity))\
             .filter(model.purchase_item_id.is_(None))\
             .group_by(getattr(model, iid_attr)).all()
@@ -160,7 +161,7 @@ def list_available_stock_batches(session: Session) -> list[StockBatch]:
             qty_to_deduct = Decimal(str(qty))
             # Find relevant batches and deduct FIFO
             for b in pi_batches:
-                if b["item_id"] == item_id and b["remaining"] > 0:
+                if b["item_type"] == expected_item_type and b["item_id"] == item_id and b["remaining"] > 0:
                     deduct = min(b["remaining"], qty_to_deduct)
                     b["remaining"] -= deduct
                     qty_to_deduct -= deduct
