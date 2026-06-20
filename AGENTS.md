@@ -12,6 +12,15 @@
 - After changing business logic, run `.venv\Scripts\python.exe -m pytest`.
 - Keep changes minimal, targeted, and consistent with the existing codebase.
 
+## Implementation Plan Maintenance
+- Keep `IMPLEMENTATION_PLAN.md` as an operational roadmap, not a chronological dump of ideas.
+- The plan must clearly separate: current implemented state, accepted product decisions, deprecated/rejected decisions, active backlog, next step, and change log.
+- Every backlog item should have an explicit status such as `done`, `in progress`, `partial`, `blocked`, `not started`, or `rejected`.
+- Keep exactly one clearly marked next step. When completing work, update that next step instead of only appending notes.
+- When product direction changes, move obsolete rules to a deprecated/rejected section instead of leaving contradictory requirements in active sections.
+- Do not add new plan sections that duplicate existing roadmap categories; update the existing category unless a genuinely new category is needed.
+- When committing meaningful business-logic or architecture changes, update the plan status or change log if the change affects roadmap state.
+
 ## Product Rules
 - Inventory is batch-based, not cumulative weighted-average based.
 - When stock is consumed, the system must preserve the user-selected source batch or preparation.
