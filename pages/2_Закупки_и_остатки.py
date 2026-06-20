@@ -160,6 +160,23 @@ with tabs[2]:
                             "Состав строк пока фиксированный."
                         )
                         with st.form(f"edit_purchase_{p.id}"):
+                            def validate_edited_purchase() -> list[str]:
+                                errors = []
+                                if edit_purchase_date > date.today():
+                                    errors.append("Дата закупки не может быть в будущем.")
+                                if not edited_lines:
+                                    errors.append("В закупке должна быть хотя бы одна позиция.")
+
+                                for line_index, line in enumerate(edited_lines, start=1):
+                                    quantity = Decimal(str(line.quantity))
+                                    unit_price = Decimal(str(line.unit_price))
+                                    if quantity <= 0:
+                                        errors.append(f"Строка {line_index}: количество должно быть больше 0.")
+                                    if unit_price < 0:
+                                        errors.append(f"Строка {line_index}: цена за единицу не может быть отрицательной.")
+
+                                return errors
+
                             edit_col1, edit_col2, edit_col3 = st.columns(3)
                             with edit_col1:
                                 edit_purchase_date = st.date_input(
@@ -252,24 +269,29 @@ with tabs[2]:
                                 )
 
                             if st.form_submit_button("Сохранить изменения"):
-                                try:
-                                    update_purchase(
-                                        db,
-                                        p.id,
-                                        purchase_date=edit_purchase_date,
-                                        lines=edited_lines,
-                                        supplier=edit_supplier or None,
-                                        purchased_by=edit_purchased_by or None,
-                                        shopping_minutes=p.shopping_minutes,
-                                        transport_cost=Decimal(str(edit_transport_cost)),
-                                        comment=edit_comment or None,
-                                    )
-                                    db.commit()
-                                    st.success("Закупка обновлена.")
-                                    st.rerun()
-                                except Exception as e:
-                                    db.rollback()
-                                    st.error(f"Ошибка при обновлении закупки: {e}")
+                                validation_errors = validate_edited_purchase()
+                                if validation_errors:
+                                    for error in validation_errors:
+                                        st.error(error)
+                                else:
+                                    try:
+                                        update_purchase(
+                                            db,
+                                            p.id,
+                                            purchase_date=edit_purchase_date,
+                                            lines=edited_lines,
+                                            supplier=edit_supplier or None,
+                                            purchased_by=edit_purchased_by or None,
+                                            shopping_minutes=p.shopping_minutes,
+                                            transport_cost=Decimal(str(edit_transport_cost)),
+                                            comment=edit_comment or None,
+                                        )
+                                        db.commit()
+                                        st.success("Закупка обновлена.")
+                                        st.rerun()
+                                    except Exception as e:
+                                        db.rollback()
+                                        st.error(f"Ошибка при обновлении закупки: {e}")
 
                         with st.form(f"delete_purchase_{p.id}"):
                             confirm_delete = st.checkbox(
