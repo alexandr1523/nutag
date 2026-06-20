@@ -189,11 +189,14 @@ with tabs[1]:
                     )
 
                 selected_batch = batch_options.get(batch_label)
-                default_unit = selected_batch.unit_short_name if selected_batch else ""
+                selected_ingredient = all_ingredients.get(selected_batch.item_id) if selected_batch else None
+                ingredient_unit = selected_ingredient.unit.short_name if selected_ingredient else ""
+                batch_unit = selected_batch.unit_short_name if selected_batch else ""
+                default_unit = ingredient_unit
                 default_price = float(selected_batch.unit_price) if selected_batch else 0.0
 
                 with cb:
-                    st.caption("Ед.")
+                    st.caption("Ед. авто")
                     st.write(default_unit or "—")
                 with cc:
                     qty = st.number_input(
@@ -236,13 +239,19 @@ with tabs[1]:
                 if ingredient_waste_decimal > qty_decimal:
                     validation_errors.append(f"Строка {i + 1}: отходы не могут быть больше расхода ингредиента.")
                     continue
+                if selected_ingredient is None:
+                    validation_errors.append(f"Строка {i + 1}: ингредиент партии отсутствует в справочнике.")
+                    continue
                 if default_unit not in all_units:
                     validation_errors.append(
-                        f"Строка {i + 1}: единица измерения партии отсутствует в справочнике."
+                        f"Строка {i + 1}: единица измерения ингредиента отсутствует в справочнике."
                     )
                     continue
-                if selected_batch.item_id not in all_ingredients:
-                    validation_errors.append(f"Строка {i + 1}: ингредиент партии отсутствует в справочнике.")
+                if batch_unit != default_unit:
+                    validation_errors.append(
+                        f"Строка {i + 1}: единица партии ({batch_unit}) не совпадает "
+                        f"с единицей ингредиента ({default_unit})."
+                    )
                     continue
 
                 batch_id = selected_batch.batch_id
@@ -259,7 +268,7 @@ with tabs[1]:
                 if selected_batch and qty_decimal > 0:
                     ingredient_uses.append(
                         PreparationIngredientInput(
-                            ingredient=all_ingredients[selected_batch.item_id],
+                            ingredient=selected_ingredient,
                             unit=all_units[default_unit],
                             quantity=qty_decimal,
                             unit_cost=Decimal(str(default_price)),
