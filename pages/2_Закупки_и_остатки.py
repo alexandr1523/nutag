@@ -21,20 +21,23 @@ from nutag.services.purchases import (
 )
 
 
-def make_default_purchase_rows(default_unit: str) -> list[dict[str, object]]:
-    """Return empty purchase rows for the purchase form."""
+def make_empty_purchase_row(default_unit: str) -> dict[str, object]:
+    """Return one empty purchase row."""
 
-    return [
-        {
-            "type": PurchaseItemType.INGREDIENT.value,
-            "name": "",
-            "unit": default_unit,
-            "qty": 0.0,
-            "price_unit": 0.0,
-            "price_total": 0.0,
-        }
-        for _ in range(10)
-    ]
+    return {
+        "type": PurchaseItemType.INGREDIENT.value,
+        "name": "",
+        "unit": default_unit,
+        "qty": 0.0,
+        "price_unit": 0.0,
+        "price_total": 0.0,
+    }
+
+
+def make_default_purchase_rows(default_unit: str) -> list[dict[str, object]]:
+    """Return initial purchase rows for the purchase form."""
+
+    return [make_empty_purchase_row(default_unit)]
 
 
 def get_catalog_unit_name(
@@ -309,6 +312,11 @@ with tabs[3]:
                 st.session_state.purchase_form_version = 0
             if "purchase_rows" not in st.session_state:
                 st.session_state.purchase_rows = make_default_purchase_rows(default_unit)
+            elif len(st.session_state.purchase_rows) > 1 and not any(
+                row["name"] or row["qty"] > 0 or row["price_unit"] > 0 or row["price_total"] > 0
+                for row in st.session_state.purchase_rows
+            ):
+                st.session_state.purchase_rows = make_default_purchase_rows(default_unit)
 
             form_version = st.session_state.purchase_form_version
 
@@ -333,9 +341,9 @@ with tabs[3]:
             )
             comment = st.text_area("Общий комментарий", key=field_key("comment"))
 
-            st.subheader("Позиции (до 10 за раз в MVP)")
+            st.subheader("Позиции")
 
-            def sync_row(idx: int) -> None:
+            def sync_row(idx: int, *, sync_unit_widget: bool = True) -> None:
                 st.session_state.purchase_rows[idx]["type"] = st.session_state[field_key("type_sel", idx)]
                 st.session_state.purchase_rows[idx]["unit"] = st.session_state[field_key("unit_sel", idx)]
                 st.session_state.purchase_rows[idx]["qty"] = st.session_state[field_key("qty_val", idx)]
@@ -360,7 +368,8 @@ with tabs[3]:
                 )
                 if fixed_unit:
                     st.session_state.purchase_rows[idx]["unit"] = fixed_unit
-                    st.session_state[field_key("unit_sel", idx)] = fixed_unit
+                    if sync_unit_widget:
+                        st.session_state[field_key("unit_sel", idx)] = fixed_unit
 
             def update_total(idx: int) -> None:
                 sync_row(idx)
@@ -379,7 +388,52 @@ with tabs[3]:
                     )
                     st.session_state[field_key("price_unit_val", idx)] = st.session_state.purchase_rows[idx]["price_unit"]
 
-            for i in range(10):
+            def validate_purchase_rows(rows: list[dict[str, object]]) -> list[str]:
+                errors = []
+                active_rows = 0
+
+                for idx, row in enumerate(rows, start=1):
+                    name = str(row["name"]).strip()
+                    qty = Decimal(str(row["qty"]))
+                    unit_price = Decimal(str(row["price_unit"]))
+                    price_total = Decimal(str(row["price_total"]))
+                    row_started = bool(name) or qty > 0 or unit_price > 0 or price_total > 0
+
+                    if not row_started:
+                        continue
+
+                    active_rows += 1
+                    if not name:
+                        errors.append(f"Строка {idx}: выберите позицию.")
+                    if qty <= 0:
+                        errors.append(f"Строка {idx}: количество должно быть больше 0.")
+                    if unit_price < 0:
+                        errors.append(f"Строка {idx}: цена за единицу не может быть отрицательной.")
+                    if price_total < 0:
+                        errors.append(f"Строка {idx}: итоговая сумма не может быть отрицательной.")
+                    if qty > 0 and abs((qty * unit_price) - price_total) > Decimal("0.01"):
+                        errors.append(f"Строка {idx}: цена за единицу и итоговая сумма не согласованы.")
+
+                if active_rows == 0:
+                    errors.append("Добавьте хотя бы одну заполненную позицию.")
+
+                return errors
+
+            control_col1, control_col2, _ = st.columns([1, 1, 4])
+            with control_col1:
+                if st.button("Добавить строку", key=field_key("add_row")):
+                    st.session_state.purchase_rows.append(make_empty_purchase_row(default_unit))
+                    st.rerun()
+            with control_col2:
+                if st.button(
+                    "Удалить последнюю",
+                    key=field_key("remove_last_row"),
+                    disabled=len(st.session_state.purchase_rows) == 1,
+                ):
+                    st.session_state.purchase_rows.pop()
+                    st.rerun()
+
+            for i in range(len(st.session_state.purchase_rows)):
                 st.markdown(f"**Позиция {i + 1}**")
                 c1, c2, c3, c4, c5, c6 = st.columns([2, 3, 1, 1, 2, 2])
 
@@ -490,6 +544,10 @@ with tabs[3]:
                     )
 
             if st.button("Сохранить закупку", type="primary", key=field_key("save")):
+                for idx in range(len(st.session_state.purchase_rows)):
+                    sync_row(idx, sync_unit_widget=False)
+
+                validation_errors = validate_purchase_rows(st.session_state.purchase_rows)
                 lines = []
                 for r in st.session_state.purchase_rows:
                     if r["name"] and r["qty"] > 0:
@@ -510,8 +568,9 @@ with tabs[3]:
                             )
                         )
 
-                if not lines:
-                    st.error("Добавьте хотя бы одну позицию с количеством > 0")
+                if validation_errors:
+                    for error in validation_errors:
+                        st.error(error)
                 else:
                     try:
                         with SessionLocal() as db_write:
