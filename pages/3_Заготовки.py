@@ -15,6 +15,7 @@ from nutag.services.inventory import list_available_stock_batches
 from nutag.services.preparations import (
     PreparationIngredientInput,
     create_preparation,
+    delete_preparation,
     is_preparation_used,
     list_preparations,
     update_preparation,
@@ -378,6 +379,32 @@ with tabs[0]:
                                             st.rerun()
                                     except Exception as e:
                                         st.error(f"Ошибка при сохранении: {e}")
+
+                        with st.expander("Удалить заготовку"):
+                            st.warning(
+                                "Удаление вернёт ингредиенты в остатки и уберёт остаток самой заготовки. "
+                                "Действие нельзя отменить."
+                            )
+                            delete_confirmation = st.text_input(
+                                "Для удаления введите УДАЛИТЬ",
+                                key=f"preparation_delete_confirm_{preparation.id}",
+                            )
+                            if st.button(
+                                "Удалить заготовку",
+                                key=f"preparation_delete_{preparation.id}",
+                                type="secondary",
+                            ):
+                                if delete_confirmation != "УДАЛИТЬ":
+                                    st.error("Введите УДАЛИТЬ для подтверждения удаления.")
+                                else:
+                                    try:
+                                        with SessionLocal() as db_write:
+                                            delete_preparation(db_write, preparation.id)
+                                            db_write.commit()
+                                            st.success("Заготовка удалена.")
+                                            st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Ошибка при удалении: {e}")
         else:
             st.info("История заготовок пуста")
 

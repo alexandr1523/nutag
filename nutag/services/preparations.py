@@ -329,6 +329,19 @@ def update_preparation(
     return preparation
 
 
+def delete_preparation(session: Session, preparation_id: int) -> None:
+    """Delete an unused preparation and its ingredient consumption lines."""
+
+    preparation = session.get(Preparation, preparation_id)
+    if preparation is None:
+        raise ValueError("Заготовка не найдена")
+    if is_preparation_used(session, preparation_id):
+        raise ValueError("Заготовка уже использована в производстве и не может быть удалена")
+
+    session.delete(preparation)
+    session.flush()
+
+
 def list_preparations(session: Session) -> list[Preparation]:
     """Return preparations ordered from newest to oldest."""
 

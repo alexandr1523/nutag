@@ -9,6 +9,7 @@ from nutag.services.preparations import (
     PreparationIngredientInput,
     calculate_ingredient_use_total,
     create_preparation,
+    delete_preparation,
     is_preparation_used,
     list_preparations,
     update_preparation,
@@ -16,6 +17,7 @@ from nutag.services.preparations import (
 from nutag.services.production import BatchPreparationInput, FinishedProductOutputInput, create_production_batch
 from nutag.services.purchases import PurchaseLineInput, create_purchase
 from nutag.services.references import create_ingredient, create_packaging, create_preparation_type, create_product, create_unit
+from nutag.services.inventory import list_available_stock_batches
 
 
 def make_session_factory():
@@ -339,6 +341,102 @@ def test_update_preparation_rejects_used_preparation() -> None:
                     PreparationIngredientInput(ingredient=meat, unit=kg, quantity="4", unit_cost="450")
                 ],
             )
+
+
+def test_delete_preparation_removes_unused_preparation_and_restores_ingredient_stock() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        dough = create_preparation_type(session, name="Тесто")
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="5",
+                    unit_price="80",
+                )
+            ],
+        )
+        preparation = create_preparation(
+            session,
+            prepared_on=date(2026, 6, 15),
+            preparation_type=dough,
+            output_quantity="2",
+            output_unit=kg,
+            ingredient_uses=[
+                PreparationIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="2",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+        )
+        preparation_id = preparation.id
+
+        stock_before_delete = [
+            batch
+            for batch in list_available_stock_batches(session)
+            if batch.batch_type == "purchase" and batch.batch_id == purchase.items[0].id
+        ][0]
+        assert stock_before_delete.current_quantity == Decimal("3.000")
+
+        delete_preparation(session, preparation_id)
+        session.commit()
+
+        assert list_preparations(session) == []
+        stock_after_delete = [
+            batch
+            for batch in list_available_stock_batches(session)
+            if batch.batch_type == "purchase" and batch.batch_id == purchase.items[0].id
+        ][0]
+        assert stock_after_delete.current_quantity == Decimal("5.000")
+
+
+def test_delete_preparation_rejects_used_preparation() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        meat = create_ingredient(session, name="Фарш", unit=kg)
+        filling = create_preparation_type(session, name="Начинка")
+        product = create_product(session, name="Пельмени")
+        preparation = create_preparation(
+            session,
+            prepared_on=date(2026, 6, 14),
+            preparation_type=filling,
+            output_quantity="4",
+            output_unit=kg,
+            ingredient_uses=[PreparationIngredientInput(ingredient=meat, unit=kg, quantity="4", unit_cost="450")],
+        )
+        create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="2",
+            output_unit=kg,
+            preparation_uses=[
+                BatchPreparationInput(
+                    preparation=preparation,
+                    unit=kg,
+                    quantity="1",
+                    unit_cost=preparation.unit_cost,
+                    source_preparation_id=preparation.id,
+                )
+            ],
+            outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=2)],
+        )
+
+        with pytest.raises(ValueError, match="использована в производстве"):
+            delete_preparation(session, preparation.id)
 
 
 def test_create_preparation_rejects_selected_purchase_batch_overdraft() -> None:
