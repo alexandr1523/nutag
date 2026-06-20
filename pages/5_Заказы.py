@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from nutag.db.init_db import initialize_database
 from nutag.db.models import Product, Unit, OrderStatus, PaymentStatus, ReservationStatus
 from nutag.db.session import create_engine_for_url, create_session_factory
+from nutag.services.inventory import list_available_finished_product_outputs
 from nutag.services.orders import create_order, list_orders, OrderItemInput
 
 
@@ -55,13 +56,20 @@ with tabs[0]:
                     st.subheader("Позиции")
                     items_data = []
                     for item in o.items:
+                        batch_label = ""
+                        if item.batch_output:
+                            batch_label = (
+                                f"Партия #{item.batch_output.batch_id}, "
+                                f"выход #{item.batch_output_id}"
+                            )
                         items_data.append({
                             "Продукт": item.product.name,
                             "Упаковка": f"{item.package_size} {item.package_unit.short_name}",
                             "Кол-во": item.package_count,
                             "Итого вес": item.total_quantity,
                             "Цена за упак": item.unit_price,
-                            "Итого": item.total_price
+                            "Итого": item.total_price,
+                            "Партия": batch_label or "Не выбрана",
                         })
                     st.table(items_data)
         else:
@@ -74,6 +82,16 @@ with tabs[1]:
     with SessionLocal() as db:
         all_products = {p.name: p for p in db.query(Product).all()}
         all_units = {u.short_name: u for u in db.query(Unit).all()}
+        available_outputs = list_available_finished_product_outputs(db)
+        available_output_options = {
+            (
+                f"{stock.product_name} | партия #{stock.output.batch_id}, выход #{stock.output_id} | "
+                f"{stock.package_size} {stock.unit_short_name} | "
+                f"остаток {stock.current_package_count:,.0f} уп. / {stock.current_quantity:,.3f} {stock.unit_short_name} | "
+                f"себестоимость {stock.unit_cost:,.4f}"
+            ): stock
+            for stock in available_outputs
+        }
         
         if not all_products:
             st.warning("Сначала добавьте продукты в Справочниках")
@@ -102,7 +120,7 @@ with tabs[1]:
                 order_items = []
                 for i in range(3):
                     st.markdown(f"**Позиция {i+1}**")
-                    ca, cb, cc, cd, ce = st.columns([3, 2, 1, 2, 2])
+                    ca, cb, cc, cd, ce, cf = st.columns([3, 2, 1, 2, 2, 5])
                     with ca:
                         p_name = st.selectbox(f"Продукт {i}", options=[""] + list(all_products.keys()), key=f"oi_prod_{i}")
                     with cb:
@@ -113,14 +131,33 @@ with tabs[1]:
                         p_count = st.number_input(f"Кол-во упак {i}", min_value=0, step=1, key=f"oi_count_{i}")
                     with ce:
                         p_price = st.number_input(f"Цена за упак {i}", min_value=0.0, step=50.0, format="%.2f", key=f"oi_price_{i}")
+                    matching_output_options = []
+                    if p_name and p_size > 0:
+                        package_size = Decimal(str(p_size))
+                        matching_output_options = [
+                            label
+                            for label, stock in available_output_options.items()
+                            if stock.product_id == all_products[p_name].id
+                            and stock.package_size == package_size
+                            and stock.unit_short_name == p_unit
+                        ]
+                    with cf:
+                        output_label = st.selectbox(
+                            f"Партия готовой продукции {i}",
+                            options=[""] + matching_output_options,
+                            key=f"oi_output_{i}",
+                            help="Выберите конкретную доступную партию готовой продукции, если заказ списывается из наличия.",
+                        )
                     
                     if p_name and p_count > 0:
+                        selected_output = available_output_options[output_label].output if output_label else None
                         order_items.append(OrderItemInput(
                             product=all_products[p_name],
                             package_size=Decimal(str(p_size)),
                             package_unit=all_units[p_unit],
                             package_count=p_count,
-                            unit_price=Decimal(str(p_price))
+                            unit_price=Decimal(str(p_price)),
+                            batch_output=selected_output,
                         ))
                 
                 submitted = st.form_submit_button("Сохранить заказ")
@@ -139,7 +176,8 @@ with tabs[1]:
                                         package_size=item.package_size,
                                         package_unit=db_write.merge(item.package_unit),
                                         package_count=item.package_count,
-                                        unit_price=item.unit_price
+                                        unit_price=item.unit_price,
+                                        batch_output=db_write.merge(item.batch_output) if item.batch_output else None,
                                     ))
                                 
                                 create_order(

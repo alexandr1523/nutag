@@ -67,6 +67,23 @@ class StockBatch:
     unit_price: Decimal
 
 
+@dataclass(frozen=True)
+class FinishedProductStock:
+    """Available finished product output with remaining quantity for order selection."""
+
+    output_id: int
+    product_id: int
+    product_name: str
+    package_size: Decimal
+    unit_short_name: str
+    produced_on: date
+    total_quantity: Decimal
+    current_quantity: Decimal
+    current_package_count: Decimal
+    unit_cost: Decimal
+    output: object
+
+
 def get_available_purchase_batch(
     session: Session,
     *,
@@ -128,6 +145,83 @@ def get_available_preparation_batch(
         raise ValueError("Недостаточно остатка в выбранной заготовке")
 
     return batch
+
+
+def get_available_finished_product_output(
+    session: Session,
+    *,
+    batch_output_id: int,
+    expected_product_id: int,
+    expected_package_size: Decimal | int | float | str,
+    expected_unit_short_name: str,
+    quantity: Decimal | int | float | str,
+):
+    """Return a selected finished output and validate it can cover an order outflow."""
+
+    from nutag.db.models import FinishedProductOutput, OrderItem
+    from sqlalchemy import func
+
+    quantity_decimal = to_decimal(quantity)
+    output = session.get(FinishedProductOutput, batch_output_id)
+    if output is None:
+        raise ValueError("Выбранная партия готовой продукции не найдена")
+    if output.batch.product_id != expected_product_id:
+        raise ValueError("Выбранная партия готовой продукции не соответствует продукту заказа")
+    if output.package_size != to_decimal(expected_package_size):
+        raise ValueError("Размер упаковки выбранной партии готовой продукции не соответствует заказу")
+    if output.package_unit.short_name != expected_unit_short_name:
+        raise ValueError("Единица упаковки выбранной партии готовой продукции не соответствует заказу")
+
+    used_quantity = session.query(func.coalesce(func.sum(OrderItem.total_quantity), 0))\
+        .filter(OrderItem.batch_output_id == batch_output_id)\
+        .scalar()
+    remaining_quantity = output.total_quantity - Decimal(str(used_quantity))
+    if remaining_quantity < quantity_decimal:
+        raise ValueError("Недостаточно остатка в выбранной партии готовой продукции")
+
+    return output
+
+
+def list_available_finished_product_outputs(session: Session) -> list[FinishedProductStock]:
+    """List finished product outputs with positive remaining quantity."""
+
+    from nutag.db.models import FinishedProductOutput, OrderItem
+    from sqlalchemy import func
+
+    used_rows = session.query(OrderItem.batch_output_id, func.sum(OrderItem.total_quantity))\
+        .filter(OrderItem.batch_output_id.isnot(None))\
+        .group_by(OrderItem.batch_output_id)\
+        .all()
+    used_by_output_id = {
+        output_id: Decimal(str(quantity))
+        for output_id, quantity in used_rows
+    }
+
+    stocks: list[FinishedProductStock] = []
+    outputs = session.query(FinishedProductOutput).order_by(FinishedProductOutput.id).all()
+    for output in outputs:
+        used_quantity = used_by_output_id.get(output.id, Decimal("0"))
+        current_quantity = output.total_quantity - used_quantity
+        if current_quantity <= 0:
+            continue
+
+        stocks.append(
+            FinishedProductStock(
+                output_id=output.id,
+                product_id=output.batch.product_id,
+                product_name=output.batch.product.name,
+                package_size=output.package_size,
+                unit_short_name=output.package_unit.short_name,
+                produced_on=output.batch.produced_on,
+                total_quantity=output.total_quantity,
+                current_quantity=current_quantity,
+                current_package_count=current_quantity / output.package_size,
+                unit_cost=output.batch.unit_cost,
+                output=output,
+            )
+        )
+
+    return sorted(stocks, key=lambda stock: (stock.product_name, stock.produced_on, stock.output_id))
 
 
 def list_available_stock_batches(session: Session) -> list[StockBatch]:

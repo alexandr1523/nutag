@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from nutag.db.models import Order, OrderItem, OrderStatus, PaymentStatus, Product, ReservationStatus, Unit, FinishedProductOutput
 from nutag.services.calculations import to_decimal
+from nutag.services.inventory import get_available_finished_product_output
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,7 @@ def create_order(
 
     total_amount = Decimal("0")
     order_items = []
+    reserved_output_quantities: dict[int, Decimal] = {}
 
     for line in item_inputs:
         line_total = calculate_order_item_total(
@@ -74,6 +76,20 @@ def create_order(
         total_amount += line_total
         
         total_quantity = to_decimal(line.package_size) * Decimal(line.package_count)
+
+        if line.batch_output is not None:
+            reserved_output_quantities[line.batch_output.id] = reserved_output_quantities.get(
+                line.batch_output.id,
+                Decimal("0"),
+            ) + total_quantity
+            get_available_finished_product_output(
+                session,
+                batch_output_id=line.batch_output.id,
+                expected_product_id=line.product.id,
+                expected_package_size=line.package_size,
+                expected_unit_short_name=line.package_unit.short_name,
+                quantity=reserved_output_quantities[line.batch_output.id],
+            )
         
         order_items.append(
             OrderItem(

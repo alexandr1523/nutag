@@ -11,7 +11,9 @@ from sqlalchemy.orm import Session
 
 from nutag.db import create_database, create_engine_for_url, create_session_factory
 from nutag.db.models import Order, OrderStatus, PaymentStatus, Product, ReservationStatus, Unit
+from nutag.services.inventory import list_available_finished_product_outputs
 from nutag.services.orders import OrderItemInput, create_order, list_orders
+from nutag.services.production import FinishedProductOutputInput, create_production_batch
 
 
 def make_session_factory():
@@ -90,3 +92,186 @@ def test_list_orders():
         assert len(orders) == 2
         assert orders[0].customer_name == "New" # Ordered by date DESC
         assert orders[1].customer_name == "Old"
+
+
+def test_create_order_persists_selected_finished_output() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        unit_kg = Unit(name="Kilogram", short_name="kg")
+        session.add(unit_kg)
+        product = Product(name="Пельмени")
+        session.add(product)
+        session.flush()
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 14),
+            product=product,
+            actual_output_quantity="2",
+            output_unit=unit_kg,
+            outputs=[FinishedProductOutputInput(package_size="0.5", package_unit=unit_kg, package_count=4)],
+        )
+        output = batch.outputs[0]
+
+        order = create_order(
+            session,
+            order_date=date(2026, 6, 15),
+            customer_name="Клиент",
+            items=[
+                OrderItemInput(
+                    product=product,
+                    package_size="0.5",
+                    package_unit=unit_kg,
+                    package_count=2,
+                    unit_price="450",
+                    batch_output=output,
+                )
+            ],
+        )
+        session.commit()
+        order_id = order.id
+        output_id = output.id
+
+    with session_factory() as session:
+        saved_order = session.get(Order, order_id)
+        assert saved_order.items[0].batch_output_id == output_id
+        assert saved_order.items[0].total_quantity == Decimal("1.000")
+        available_outputs = list_available_finished_product_outputs(session)
+        assert len(available_outputs) == 1
+        assert available_outputs[0].output_id == output_id
+        assert available_outputs[0].current_quantity == Decimal("1.000")
+
+
+def test_create_order_rejects_selected_finished_output_overdraft() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        unit_kg = Unit(name="Kilogram", short_name="kg")
+        session.add(unit_kg)
+        product = Product(name="Пельмени")
+        session.add(product)
+        session.flush()
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 14),
+            product=product,
+            actual_output_quantity="1",
+            output_unit=unit_kg,
+            outputs=[FinishedProductOutputInput(package_size="0.5", package_unit=unit_kg, package_count=2)],
+        )
+        output = batch.outputs[0]
+
+        create_order(
+            session,
+            order_date=date(2026, 6, 15),
+            customer_name="Первый",
+            items=[
+                OrderItemInput(
+                    product=product,
+                    package_size="0.5",
+                    package_unit=unit_kg,
+                    package_count=1,
+                    unit_price="450",
+                    batch_output=output,
+                )
+            ],
+        )
+
+        with pytest.raises(ValueError, match="Недостаточно остатка"):
+            create_order(
+                session,
+                order_date=date(2026, 6, 16),
+                customer_name="Второй",
+                items=[
+                    OrderItemInput(
+                        product=product,
+                        package_size="0.5",
+                        package_unit=unit_kg,
+                        package_count=2,
+                        unit_price="450",
+                        batch_output=output,
+                    )
+                ],
+            )
+
+
+def test_create_order_rejects_selected_finished_output_wrong_product() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        unit_kg = Unit(name="Kilogram", short_name="kg")
+        session.add(unit_kg)
+        product = Product(name="Пельмени")
+        other_product = Product(name="Вареники")
+        session.add_all([product, other_product])
+        session.flush()
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 14),
+            product=product,
+            actual_output_quantity="1",
+            output_unit=unit_kg,
+            outputs=[FinishedProductOutputInput(package_size="0.5", package_unit=unit_kg, package_count=2)],
+        )
+
+        with pytest.raises(ValueError, match="не соответствует продукту"):
+            create_order(
+                session,
+                order_date=date(2026, 6, 15),
+                customer_name="Клиент",
+                items=[
+                    OrderItemInput(
+                        product=other_product,
+                        package_size="0.5",
+                        package_unit=unit_kg,
+                        package_count=1,
+                        unit_price="450",
+                        batch_output=batch.outputs[0],
+                    )
+                ],
+            )
+
+
+def test_create_order_rejects_cumulative_selected_finished_output_overdraft() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        unit_kg = Unit(name="Kilogram", short_name="kg")
+        session.add(unit_kg)
+        product = Product(name="Пельмени")
+        session.add(product)
+        session.flush()
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 14),
+            product=product,
+            actual_output_quantity="1",
+            output_unit=unit_kg,
+            outputs=[FinishedProductOutputInput(package_size="0.5", package_unit=unit_kg, package_count=2)],
+        )
+        output = batch.outputs[0]
+
+        with pytest.raises(ValueError, match="Недостаточно остатка"):
+            create_order(
+                session,
+                order_date=date(2026, 6, 15),
+                customer_name="Клиент",
+                items=[
+                    OrderItemInput(
+                        product=product,
+                        package_size="0.5",
+                        package_unit=unit_kg,
+                        package_count=1,
+                        unit_price="450",
+                        batch_output=output,
+                    ),
+                    OrderItemInput(
+                        product=product,
+                        package_size="0.5",
+                        package_unit=unit_kg,
+                        package_count=2,
+                        unit_price="450",
+                        batch_output=output,
+                    ),
+                ],
+            )
