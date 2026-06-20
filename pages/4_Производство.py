@@ -284,23 +284,19 @@ with tabs[1]:
                     def_price = float(selected_pk_batch.unit_price) if selected_pk_batch else 0.0
 
                     with cb:
-                        u_name = st.selectbox(
-                            f"Ед уп {i}",
-                            options=list(all_units.keys()),
-                            index=list(all_units.keys()).index(def_unit) if def_unit in all_units else 0,
-                            key=f"bpk_unit_{i}",
-                        )
+                        st.caption("Ед. авто")
+                        st.write(def_unit or "—")
                     with cc:
                         qty = st.number_input(f"Кол-во уп {i}", min_value=0.0, step=1.0, format="%.0f", key=f"bpk_qty_{i}")
                     with cd:
                         st.write("Цена:")
                         st.info(f"{def_price:,.2f}")
 
-                    if selected_pk_batch and qty > 0:
+                    if selected_pk_batch and qty > 0 and def_unit in all_units:
                         pkg_uses.append(
                             BatchPackagingInput(
                                 packaging=all_packaging[selected_pk_batch.item_id],
-                                unit=all_units[u_name],
+                                unit=all_units[def_unit],
                                 quantity=Decimal(str(qty)),
                                 unit_cost=Decimal(str(def_price)),
                                 purchase_item_id=selected_pk_batch.batch_id,
