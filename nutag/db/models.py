@@ -251,6 +251,7 @@ class PreparationIngredientUse(Base, TimestampMixin):
     purchase_item_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_items.id"))
     unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    waste_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), default=Decimal("0"), nullable=False)
     unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
     total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text)

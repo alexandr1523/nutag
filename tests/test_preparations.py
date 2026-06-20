@@ -63,6 +63,105 @@ def test_create_preparation_calculates_total_and_unit_cost() -> None:
         assert saved.unit_cost == Decimal("451.7500")
         assert len(saved.ingredient_uses) == 2
         assert [line.total_cost for line in saved.ingredient_uses] == [Decimal("92.00"), Decimal("1395.00")]
+        assert [line.waste_quantity for line in saved.ingredient_uses] == [Decimal("0.000"), Decimal("0.000")]
+
+
+def test_create_preparation_tracks_waste_by_ingredient_use() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        meat = create_ingredient(session, name="Фарш", unit=kg)
+        onion = create_ingredient(session, name="Лук", unit=kg)
+        filling = create_preparation_type(session, name="Начинка")
+
+        preparation = create_preparation(
+            session,
+            prepared_on=date(2026, 6, 14),
+            preparation_type=filling,
+            output_quantity="4",
+            output_unit=kg,
+            ingredient_uses=[
+                PreparationIngredientInput(
+                    ingredient=meat,
+                    unit=kg,
+                    quantity="3",
+                    waste_quantity="0.2",
+                    unit_cost="465",
+                ),
+                PreparationIngredientInput(
+                    ingredient=onion,
+                    unit=kg,
+                    quantity="0.5",
+                    waste_quantity="0.05",
+                    unit_cost="100",
+                ),
+            ],
+        )
+        session.commit()
+        preparation_id = preparation.id
+
+    with session_factory() as session:
+        saved = list_preparations(session)[0]
+        assert saved.id == preparation_id
+        assert [line.quantity for line in saved.ingredient_uses] == [Decimal("3.000"), Decimal("0.500")]
+        assert [line.waste_quantity for line in saved.ingredient_uses] == [Decimal("0.200"), Decimal("0.050")]
+        assert [line.total_cost for line in saved.ingredient_uses] == [Decimal("1395.00"), Decimal("50.00")]
+        assert saved.total_cost == Decimal("1445.00")
+
+
+def test_create_preparation_rejects_negative_ingredient_waste() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        filling = create_preparation_type(session, name="Тесто")
+
+        with pytest.raises(ValueError, match="waste quantity"):
+            create_preparation(
+                session,
+                prepared_on=date(2026, 6, 14),
+                preparation_type=filling,
+                output_quantity="1",
+                output_unit=kg,
+                ingredient_uses=[
+                    PreparationIngredientInput(
+                        ingredient=flour,
+                        unit=kg,
+                        quantity="1",
+                        waste_quantity="-0.1",
+                        unit_cost="92",
+                    )
+                ],
+            )
+
+
+def test_create_preparation_rejects_ingredient_waste_greater_than_quantity() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        filling = create_preparation_type(session, name="Тесто")
+
+        with pytest.raises(ValueError, match="cannot exceed"):
+            create_preparation(
+                session,
+                prepared_on=date(2026, 6, 14),
+                preparation_type=filling,
+                output_quantity="1",
+                output_unit=kg,
+                ingredient_uses=[
+                    PreparationIngredientInput(
+                        ingredient=flour,
+                        unit=kg,
+                        quantity="1",
+                        waste_quantity="1.1",
+                        unit_cost="92",
+                    )
+                ],
+            )
 
 
 def test_create_preparation_uses_selected_purchase_batch_price() -> None:
@@ -98,6 +197,7 @@ def test_create_preparation_uses_selected_purchase_batch_price() -> None:
                     ingredient=flour,
                     unit=kg,
                     quantity="2",
+                    waste_quantity="0.5",
                     unit_cost="999",
                     purchase_item_id=purchase.items[0].id,
                 )
@@ -106,6 +206,8 @@ def test_create_preparation_uses_selected_purchase_batch_price() -> None:
         session.commit()
 
         assert preparation.ingredient_uses[0].unit_cost == Decimal("80.0000")
+        assert preparation.ingredient_uses[0].quantity == Decimal("2.000")
+        assert preparation.ingredient_uses[0].waste_quantity == Decimal("0.500")
         assert preparation.ingredient_uses[0].total_cost == Decimal("160.00")
         assert preparation.total_cost == Decimal("160.00")
 

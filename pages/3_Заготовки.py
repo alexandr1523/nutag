@@ -40,7 +40,11 @@ with tabs[0]:
                         st.write(f"**Дата:** {preparation.prepared_on}")
                         st.write(f"**Вид заготовки:** {preparation_label}")
                         st.write(f"**Выход:** {preparation.output_quantity} {preparation.output_unit.short_name}")
-                        st.write(f"**Отходы:** {preparation.waste_quantity} {preparation.output_unit.short_name}")
+                        if preparation.waste_quantity:
+                            st.write(
+                                f"**Общие отходы:** {preparation.waste_quantity} "
+                                f"{preparation.output_unit.short_name}"
+                            )
                         st.write(f"**Труд:** {preparation.labor_cost:,.2f}")
                         st.write(f"**Прочее:** {preparation.other_direct_cost:,.2f}")
                     with col2:
@@ -54,7 +58,9 @@ with tabs[0]:
                         ingredient_rows.append(
                             {
                                 "Ингредиент": use.ingredient.name + source_info,
-                                "Кол-во": use.quantity,
+                                "Расход": use.quantity,
+                                "Отходы": use.waste_quantity,
+                                "Полезно": use.quantity - use.waste_quantity,
                                 "Ед.изм.": use.unit.short_name,
                                 "Цена": use.unit_cost,
                                 "Итого": use.total_cost,
@@ -110,8 +116,8 @@ with tabs[1]:
             with col3:
                 prep_comment = st.text_area("Комментарий", key=field_key("comment"))
 
-            st.subheader("Выход и отходы")
-            c1, c2, c3 = st.columns(3)
+            st.subheader("Выход")
+            c1, c2 = st.columns(2)
             with c1:
                 output_qty = st.number_input(
                     "Кол-во на выходе (годное)",
@@ -121,14 +127,6 @@ with tabs[1]:
                     key=field_key("output_qty"),
                 )
             with c2:
-                waste_qty = st.number_input(
-                    "Отходы/Обрезь",
-                    min_value=0.0,
-                    step=0.1,
-                    format="%.3f",
-                    key=field_key("waste_qty"),
-                )
-            with c3:
                 output_unit_name = st.selectbox("Ед. изм.", options=list(all_units.keys()), key=field_key("output_unit"))
 
             st.subheader("Расходы")
@@ -182,7 +180,7 @@ with tabs[1]:
             batches_by_id = {}
             for i in range(5):
                 st.markdown(f"**Ингредиент {i + 1}**")
-                ca, cb, cc, cd = st.columns([4, 1, 2, 2.5])
+                ca, cb, cc, cd, ce, cf = st.columns([4, 1, 2, 2, 2, 2.5])
                 with ca:
                     batch_label = st.selectbox(
                         f"Выбор партии {i + 1}",
@@ -206,17 +204,37 @@ with tabs[1]:
                         key=field_key("ing_qty", i),
                     )
                 with cd:
-                    line_total = Decimal(str(qty)) * Decimal(str(default_price))
-                    st.metric(f"Стоимость {i + 1}", f"{line_total:,.2f}")
+                    ingredient_waste_qty = st.number_input(
+                        f"Отходы {i + 1}",
+                        min_value=0.0,
+                        step=0.1,
+                        format="%.3f",
+                        key=field_key("ing_waste_qty", i),
+                    )
+                with ce:
+                    qty_decimal = Decimal(str(qty))
+                    ingredient_waste_decimal = Decimal(str(ingredient_waste_qty))
+                    useful_qty = qty_decimal - ingredient_waste_decimal
+                    st.metric(f"Полезно {i + 1}", f"{useful_qty:,.3f}")
+                with cf:
+                    line_total = qty_decimal * Decimal(str(default_price))
+                    st.metric(f"Стоимость списания {i + 1}", f"{line_total:,.2f}")
+                    if useful_qty > 0 and default_unit:
+                        useful_unit_cost = line_total / useful_qty
+                        st.caption(f"Себест. полезного: {useful_unit_cost:,.2f}/{default_unit}")
 
-                qty_decimal = Decimal(str(qty))
-                if selected_batch is None and qty_decimal > 0:
-                    validation_errors.append(f"Строка {i + 1}: выберите партию ингредиента или очистите количество.")
+                if selected_batch is None and (qty_decimal > 0 or ingredient_waste_decimal > 0):
+                    validation_errors.append(
+                        f"Строка {i + 1}: выберите партию ингредиента или очистите количество и отходы."
+                    )
                     continue
                 if selected_batch is not None and qty_decimal <= 0:
                     validation_errors.append(f"Строка {i + 1}: укажите количество больше 0 или очистите строку.")
                     continue
                 if selected_batch is None:
+                    continue
+                if ingredient_waste_decimal > qty_decimal:
+                    validation_errors.append(f"Строка {i + 1}: отходы не могут быть больше расхода ингредиента.")
                     continue
                 if default_unit not in all_units:
                     validation_errors.append(
@@ -245,6 +263,7 @@ with tabs[1]:
                             unit=all_units[default_unit],
                             quantity=qty_decimal,
                             unit_cost=Decimal(str(default_price)),
+                            waste_quantity=ingredient_waste_decimal,
                             purchase_item_id=selected_batch.batch_id,
                         )
                     )
@@ -283,6 +302,7 @@ with tabs[1]:
                                     unit=db_write.merge(use.unit),
                                     quantity=use.quantity,
                                     unit_cost=use.unit_cost,
+                                    waste_quantity=use.waste_quantity,
                                     purchase_item_id=use.purchase_item_id,
                                 )
                                 for use in ingredient_uses
@@ -293,7 +313,7 @@ with tabs[1]:
                                 prepared_on=prep_date,
                                 preparation_type=db_preparation_type,
                                 output_quantity=Decimal(str(output_qty)),
-                                waste_quantity=Decimal(str(waste_qty)),
+                                waste_quantity=Decimal("0"),
                                 output_unit=db_output_unit,
                                 ingredient_uses=db_ingredient_uses,
                                 labor_cost=calculated_labor_cost,

@@ -23,6 +23,7 @@ class PreparationIngredientInput:
     unit: Unit
     quantity: Decimal | int | float | str
     unit_cost: Decimal | int | float | str
+    waste_quantity: Decimal | int | float | str = 0
     purchase_item_id: int | None = None
     comment: str | None = None
 
@@ -69,8 +70,19 @@ def create_preparation(
         raise ValueError("Preparation must contain at least one ingredient use")
 
     ingredient_unit_costs = []
+    ingredient_quantities = []
+    ingredient_waste_quantities = []
     reserved_purchase_quantities: dict[int, Decimal] = {}
     for line in ingredient_inputs:
+        quantity_decimal = to_decimal(line.quantity)
+        waste_quantity_decimal = to_decimal(line.waste_quantity)
+        if waste_quantity_decimal < 0:
+            raise ValueError("Ingredient waste quantity cannot be negative")
+        if waste_quantity_decimal > quantity_decimal:
+            raise ValueError("Ingredient waste quantity cannot exceed ingredient use quantity")
+        ingredient_quantities.append(quantity_decimal)
+        ingredient_waste_quantities.append(waste_quantity_decimal)
+
         if line.purchase_item_id is None:
             ingredient_unit_costs.append(to_decimal(line.unit_cost))
             continue
@@ -78,7 +90,7 @@ def create_preparation(
         reserved_purchase_quantities[line.purchase_item_id] = reserved_purchase_quantities.get(
             line.purchase_item_id,
             Decimal("0"),
-        ) + to_decimal(line.quantity)
+        ) + quantity_decimal
         batch = get_available_purchase_batch(
             session,
             purchase_item_id=line.purchase_item_id,
@@ -90,8 +102,8 @@ def create_preparation(
         ingredient_unit_costs.append(batch.unit_price)
 
     ingredient_total_costs = [
-        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=unit_cost)
-        for line, unit_cost in zip(ingredient_inputs, ingredient_unit_costs, strict=True)
+        calculate_ingredient_use_total(quantity=quantity, unit_cost=unit_cost)
+        for quantity, unit_cost in zip(ingredient_quantities, ingredient_unit_costs, strict=True)
     ]
     total_cost = calculate_preparation_cost(
         ingredient_costs=ingredient_total_costs,
@@ -114,13 +126,21 @@ def create_preparation(
         comment=comment,
     )
 
-    for line, unit_cost, line_total in zip(ingredient_inputs, ingredient_unit_costs, ingredient_total_costs, strict=True):
+    for line, quantity, waste_quantity, unit_cost, line_total in zip(
+        ingredient_inputs,
+        ingredient_quantities,
+        ingredient_waste_quantities,
+        ingredient_unit_costs,
+        ingredient_total_costs,
+        strict=True,
+    ):
         preparation.ingredient_uses.append(
             PreparationIngredientUse(
                 ingredient=line.ingredient,
                 unit=line.unit,
                 purchase_item_id=line.purchase_item_id,
-                quantity=to_decimal(line.quantity),
+                quantity=quantity,
+                waste_quantity=waste_quantity,
                 unit_cost=unit_cost,
                 total_cost=line_total,
                 comment=line.comment,
