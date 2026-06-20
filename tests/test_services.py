@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 
 from nutag.db import create_database, create_engine_for_url, create_session_factory
-from nutag.db.models import PurchaseItemType
+from nutag.db.models import Consumable, PurchaseItemType
 from nutag.services.purchases import PurchaseLineInput, calculate_purchase_line_total, create_purchase, list_purchases
 from nutag.services.references import (
     create_ingredient,
@@ -113,3 +113,131 @@ def test_purchase_service_rejects_purchase_without_lines() -> None:
                 purchase_date=date(2026, 6, 14),
                 lines=[],
             )
+
+
+def test_purchase_service_rejects_line_without_item_source() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+
+        with pytest.raises(ValueError, match="ровно на один тип"):
+            create_purchase(
+                session,
+                purchase_date=date(2026, 6, 14),
+                lines=[
+                    PurchaseLineInput(
+                        item_type=PurchaseItemType.INGREDIENT,
+                        item_name="Мука",
+                        unit=kg,
+                        quantity="1",
+                        unit_price="80",
+                    )
+                ],
+            )
+
+
+def test_purchase_service_rejects_line_with_wrong_item_source_type() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        piece = create_unit(session, name="piece", short_name="pcs")
+        container = create_packaging(session, name="Контейнер", unit=piece)
+
+        with pytest.raises(ValueError, match="не соответствует"):
+            create_purchase(
+                session,
+                purchase_date=date(2026, 6, 14),
+                lines=[
+                    PurchaseLineInput(
+                        item_type=PurchaseItemType.INGREDIENT,
+                        item_name=container.name,
+                        packaging=container,
+                        unit=piece,
+                        quantity="10",
+                        unit_price="5",
+                    )
+                ],
+            )
+
+
+def test_purchase_service_rejects_line_with_multiple_item_sources() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        piece = create_unit(session, name="piece", short_name="pcs")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        container = create_packaging(session, name="Контейнер", unit=piece)
+
+        with pytest.raises(ValueError, match="ровно на один тип"):
+            create_purchase(
+                session,
+                purchase_date=date(2026, 6, 14),
+                lines=[
+                    PurchaseLineInput(
+                        item_type=PurchaseItemType.INGREDIENT,
+                        item_name=flour.name,
+                        ingredient=flour,
+                        packaging=container,
+                        unit=kg,
+                        quantity="1",
+                        unit_price="80",
+                    )
+                ],
+            )
+
+
+def test_purchase_service_rejects_line_with_wrong_unit() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        piece = create_unit(session, name="piece", short_name="pcs")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+
+        with pytest.raises(ValueError, match="Единица измерения"):
+            create_purchase(
+                session,
+                purchase_date=date(2026, 6, 14),
+                lines=[
+                    PurchaseLineInput(
+                        item_type=PurchaseItemType.INGREDIENT,
+                        item_name=flour.name,
+                        ingredient=flour,
+                        unit=piece,
+                        quantity="1",
+                        unit_price="80",
+                    )
+                ],
+            )
+
+
+def test_purchase_service_accepts_consumable_line() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        piece = create_unit(session, name="piece", short_name="pcs")
+        gloves = Consumable(name="Перчатки", unit=piece)
+        session.add(gloves)
+        session.flush()
+
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.CONSUMABLE,
+                    item_name=gloves.name,
+                    consumable=gloves,
+                    unit=piece,
+                    quantity="10",
+                    unit_price="3",
+                )
+            ],
+        )
+        session.commit()
+
+        assert purchase.items[0].consumable_id == gloves.id
+        assert purchase.items[0].ingredient_id is None
+        assert purchase.items[0].packaging_id is None

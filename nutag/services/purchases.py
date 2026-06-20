@@ -30,6 +30,26 @@ class PurchaseLineInput:
     comment: str | None = None
 
 
+def validate_purchase_line_source(line: PurchaseLineInput) -> None:
+    """Validate that the purchase line has exactly one source matching item_type."""
+
+    sources = {
+        PurchaseItemType.INGREDIENT: line.ingredient,
+        PurchaseItemType.PACKAGING: line.packaging,
+        PurchaseItemType.CONSUMABLE: line.consumable,
+    }
+    selected_sources = [source for source in sources.values() if source is not None]
+    if len(selected_sources) != 1:
+        raise ValueError("Строка закупки должна ссылаться ровно на один тип позиции")
+
+    expected_source = sources.get(line.item_type)
+    if expected_source is None:
+        raise ValueError("Тип строки закупки не соответствует выбранной позиции")
+
+    if expected_source.unit_id != line.unit.id:
+        raise ValueError("Единица измерения строки закупки не соответствует выбранной позиции")
+
+
 def calculate_purchase_line_total(
     *,
     quantity: Decimal | int | float | str,
@@ -74,6 +94,7 @@ def create_purchase(
     )
 
     for index, line in enumerate(line_inputs, start=1):
+        validate_purchase_line_source(line)
         total_price = calculate_purchase_line_total(
             quantity=line.quantity,
             unit_price=line.unit_price,
