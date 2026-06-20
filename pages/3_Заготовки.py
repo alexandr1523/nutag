@@ -67,6 +67,10 @@ with tabs[0]:
 with tabs[1]:
     st.header("Новая заготовка")
 
+    saved_message = st.session_state.pop("preparation_saved_message", None)
+    if saved_message:
+        st.success(saved_message)
+
     with SessionLocal() as db:
         available_batches = list_available_stock_batches(db)
         ingredient_batches = [batch for batch in available_batches if batch.item_type == PurchaseItemType.INGREDIENT]
@@ -85,22 +89,47 @@ with tabs[1]:
         elif not ingredient_batches:
             st.warning("На складе нет доступных ингредиентов. Сначала оформите закупки.")
         else:
+            if "preparation_form_version" not in st.session_state:
+                st.session_state.preparation_form_version = 0
+
+            form_version = st.session_state.preparation_form_version
+
+            def field_key(name: str, idx: int | None = None) -> str:
+                suffix = f"_{idx}" if idx is not None else ""
+                return f"preparation_{form_version}_{name}{suffix}"
+
             col1, col2, col3 = st.columns(3)
             with col1:
-                prep_date = st.date_input("Дата приготовления", value=date.today())
+                prep_date = st.date_input("Дата приготовления", value=date.today(), key=field_key("date"))
             with col2:
-                preparation_type_name = st.selectbox("Вид заготовки", options=list(preparation_type_options.keys()))
+                preparation_type_name = st.selectbox(
+                    "Вид заготовки",
+                    options=list(preparation_type_options.keys()),
+                    key=field_key("type"),
+                )
             with col3:
-                prep_comment = st.text_area("Комментарий", key="prep_comm")
+                prep_comment = st.text_area("Комментарий", key=field_key("comment"))
 
             st.subheader("Выход и отходы")
             c1, c2, c3 = st.columns(3)
             with c1:
-                output_qty = st.number_input("Кол-во на выходе (годное)", min_value=0.0, step=0.1, format="%.3f")
+                output_qty = st.number_input(
+                    "Кол-во на выходе (годное)",
+                    min_value=0.0,
+                    step=0.1,
+                    format="%.3f",
+                    key=field_key("output_qty"),
+                )
             with c2:
-                waste_qty = st.number_input("Отходы/Обрезь", min_value=0.0, step=0.1, format="%.3f")
+                waste_qty = st.number_input(
+                    "Отходы/Обрезь",
+                    min_value=0.0,
+                    step=0.1,
+                    format="%.3f",
+                    key=field_key("waste_qty"),
+                )
             with c3:
-                output_unit_name = st.selectbox("Ед. изм.", options=list(all_units.keys()))
+                output_unit_name = st.selectbox("Ед. изм.", options=list(all_units.keys()), key=field_key("output_unit"))
 
             st.subheader("Расходы")
             c3, c4, c5 = st.columns(3)
@@ -109,7 +138,13 @@ with tabs[1]:
                 rate_val = float(current_labor_rate.hourly_rate) if current_labor_rate else 0.0
 
             with c3:
-                labor_hours = st.number_input("Время труда (часы)", min_value=0.0, step=0.1, format="%.2f")
+                labor_hours = st.number_input(
+                    "Время труда (часы)",
+                    min_value=0.0,
+                    step=0.1,
+                    format="%.2f",
+                    key=field_key("labor_hours"),
+                )
             with c4:
                 st.session_state["prep_rate_display"] = rate_val
                 st.number_input(
@@ -132,67 +167,111 @@ with tabs[1]:
                     disabled=True,
                 )
 
-            other_cost = st.number_input("Прочие прямые расходы", min_value=0.0, step=10.0, format="%.2f")
+            other_cost = st.number_input(
+                "Прочие прямые расходы",
+                min_value=0.0,
+                step=10.0,
+                format="%.2f",
+                key=field_key("other_cost"),
+            )
 
             st.subheader("Ингредиенты (до 5 в MVP)")
             ingredient_uses = []
+            validation_errors: list[str] = []
+            requested_quantities_by_batch: dict[int, Decimal] = {}
+            batches_by_id = {}
             for i in range(5):
                 st.markdown(f"**Ингредиент {i + 1}**")
                 ca, cb, cc, cd = st.columns([4, 1, 2, 2.5])
                 with ca:
                     batch_label = st.selectbox(
-                        f"Выбор партии {i}",
+                        f"Выбор партии {i + 1}",
                         options=[""] + list(batch_options.keys()),
-                        key=f"batch_label_{i}",
+                        key=field_key("batch_label", i),
                     )
 
                 selected_batch = batch_options.get(batch_label)
                 default_unit = selected_batch.unit_short_name if selected_batch else ""
                 default_price = float(selected_batch.unit_price) if selected_batch else 0.0
 
-                if selected_batch and st.session_state.get(f"ing_unit_{i}") != default_unit:
-                    st.session_state[f"ing_unit_{i}"] = default_unit
-
                 with cb:
-                    unit_name = st.selectbox(
-                        f"Ед {i}",
-                        options=list(all_units.keys()),
-                        index=list(all_units.keys()).index(
-                            st.session_state.get(f"ing_unit_{i}", default_unit or list(all_units.keys())[0])
-                        ),
-                        key=f"ing_unit_{i}",
-                        disabled=selected_batch is not None,
-                    )
+                    st.caption("Ед.")
+                    st.write(default_unit or "—")
                 with cc:
-                    qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"ing_qty_{i}")
+                    qty = st.number_input(
+                        f"Кол-во {i + 1}",
+                        min_value=0.0,
+                        step=0.1,
+                        format="%.3f",
+                        key=field_key("ing_qty", i),
+                    )
                 with cd:
                     line_total = Decimal(str(qty)) * Decimal(str(default_price))
-                    st.session_state[f"ing_total_{i}"] = float(line_total)
-                    st.number_input(
-                        f"Стоимость {i}",
-                        min_value=0.0,
-                        step=1.0,
-                        format="%.2f",
-                        key=f"ing_total_{i}",
-                        disabled=True,
-                    )
+                    st.metric(f"Стоимость {i + 1}", f"{line_total:,.2f}")
 
-                if selected_batch and qty > 0:
+                qty_decimal = Decimal(str(qty))
+                if selected_batch is None and qty_decimal > 0:
+                    validation_errors.append(f"Строка {i + 1}: выберите партию ингредиента или очистите количество.")
+                    continue
+                if selected_batch is not None and qty_decimal <= 0:
+                    validation_errors.append(f"Строка {i + 1}: укажите количество больше 0 или очистите строку.")
+                    continue
+                if selected_batch is None:
+                    continue
+                if default_unit not in all_units:
+                    validation_errors.append(
+                        f"Строка {i + 1}: единица измерения партии отсутствует в справочнике."
+                    )
+                    continue
+                if selected_batch.item_id not in all_ingredients:
+                    validation_errors.append(f"Строка {i + 1}: ингредиент партии отсутствует в справочнике.")
+                    continue
+
+                batch_id = selected_batch.batch_id
+                batches_by_id[batch_id] = selected_batch
+                requested_quantities_by_batch[batch_id] = requested_quantities_by_batch.get(
+                    batch_id, Decimal("0")
+                ) + qty_decimal
+                if qty_decimal > Decimal(str(selected_batch.current_quantity)):
+                    validation_errors.append(
+                        f"Строка {i + 1}: количество больше остатка выбранной партии."
+                    )
+                    continue
+
+                if selected_batch and qty_decimal > 0:
                     ingredient_uses.append(
                         PreparationIngredientInput(
                             ingredient=all_ingredients[selected_batch.item_id],
-                            unit=all_units[unit_name],
-                            quantity=Decimal(str(qty)),
+                            unit=all_units[default_unit],
+                            quantity=qty_decimal,
                             unit_cost=Decimal(str(default_price)),
                             purchase_item_id=selected_batch.batch_id,
                         )
                     )
 
-            if st.button("Сохранить заготовку", type="primary"):
+            for batch_id, requested_quantity in requested_quantities_by_batch.items():
+                available_quantity = Decimal(str(batches_by_id[batch_id].current_quantity))
+                if requested_quantity > available_quantity:
+                    batch = batches_by_id[batch_id]
+                    validation_errors.append(
+                        f"Суммарное количество по партии '{batch.item_name}' больше доступного остатка."
+                    )
+
+            if st.button("Сохранить заготовку", type="primary", key=field_key("save")):
+                submit_errors = []
+                if not preparation_type_name or preparation_type_name not in preparation_type_options:
+                    submit_errors.append("Выберите вид заготовки.")
                 if output_qty <= 0:
-                    st.error("Количество на выходе должно быть больше 0")
-                elif not ingredient_uses:
-                    st.error("Добавьте хотя бы один ингредиент")
+                    submit_errors.append("Количество на выходе должно быть больше 0.")
+                if not output_unit_name or output_unit_name not in all_units:
+                    submit_errors.append("Выберите единицу измерения выхода.")
+                if not ingredient_uses and not validation_errors:
+                    submit_errors.append("Добавьте хотя бы один ингредиент.")
+                submit_errors.extend(validation_errors)
+
+                if submit_errors:
+                    for error in submit_errors:
+                        st.error(error)
                 else:
                     try:
                         with SessionLocal() as db_write:
@@ -222,7 +301,10 @@ with tabs[1]:
                                 comment=prep_comment,
                             )
                             db_write.commit()
-                            st.success(f"Заготовка '{preparation_type_name}' успешно сохранена!")
+                            st.session_state.preparation_form_version += 1
+                            st.session_state.preparation_saved_message = (
+                                f"Заготовка '{preparation_type_name}' успешно сохранена."
+                            )
                             st.rerun()
                     except Exception as e:
                         st.error(f"Ошибка при сохранении: {e}")
