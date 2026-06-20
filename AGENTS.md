@@ -6,6 +6,10 @@
 - Use `.venv\Scripts\python.exe` for Python commands, including tests.
 - Use standard non-interactive git commands.
 
+## Codex Skills Validation
+- On Windows, run Codex skill validation in Python UTF-8 mode to avoid default codepage decode errors on Russian text:
+  `.venv\Scripts\python.exe -X utf8 C:\Users\alexa\.codex\skills\.system\skill-creator\scripts\quick_validate.py .codex\skills\skill-name`
+
 ## Working Rules
 - Read the current file state before proposing or applying changes.
 - Do not overwrite or revert user changes unless explicitly asked.
