@@ -294,13 +294,17 @@ with tabs[2]:
                                         st.error(f"Ошибка при обновлении закупки: {e}")
 
                         with st.form(f"delete_purchase_{p.id}"):
-                            confirm_delete = st.checkbox(
-                                "Подтверждаю удаление этой закупки",
+                            st.warning(
+                                "Удаление закупки необратимо: будут удалены документ, его строки и связанные остатки по этим партиям."
+                            )
+                            confirm_delete = st.text_input(
+                                "Для удаления введите УДАЛИТЬ",
                                 key=f"confirm_delete_purchase_{p.id}",
                             )
-                            if st.form_submit_button("Удалить закупку"):
-                                if not confirm_delete:
-                                    st.error("Для удаления отметьте подтверждение.")
+                            delete_submitted = st.form_submit_button("Удалить закупку")
+                            if delete_submitted:
+                                if confirm_delete != "УДАЛИТЬ":
+                                    st.error("Для удаления введите УДАЛИТЬ.")
                                 else:
                                     try:
                                         delete_purchase(db, p.id)
