@@ -9,10 +9,13 @@ from nutag.services.preparations import (
     PreparationIngredientInput,
     calculate_ingredient_use_total,
     create_preparation,
+    is_preparation_used,
     list_preparations,
+    update_preparation,
 )
+from nutag.services.production import BatchPreparationInput, FinishedProductOutputInput, create_production_batch
 from nutag.services.purchases import PurchaseLineInput, create_purchase
-from nutag.services.references import create_ingredient, create_packaging, create_preparation_type, create_unit
+from nutag.services.references import create_ingredient, create_packaging, create_preparation_type, create_product, create_unit
 
 
 def make_session_factory():
@@ -210,6 +213,132 @@ def test_create_preparation_uses_selected_purchase_batch_price() -> None:
         assert preparation.ingredient_uses[0].waste_quantity == Decimal("0.500")
         assert preparation.ingredient_uses[0].total_cost == Decimal("160.00")
         assert preparation.total_cost == Decimal("160.00")
+
+
+def test_update_preparation_recalculates_unused_preparation() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        dough = create_preparation_type(session, name="Тесто")
+        thick_dough = create_preparation_type(session, name="Плотное тесто")
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="2",
+                    unit_price="80",
+                )
+            ],
+        )
+        preparation = create_preparation(
+            session,
+            prepared_on=date(2026, 6, 15),
+            preparation_type=dough,
+            output_quantity="1",
+            output_unit=kg,
+            ingredient_uses=[
+                PreparationIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="2",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+            labor_cost="10",
+        )
+        preparation_id = preparation.id
+
+        updated = update_preparation(
+            session,
+            preparation_id,
+            prepared_on=date(2026, 6, 16),
+            preparation_type=thick_dough,
+            output_quantity="1.5",
+            output_unit=kg,
+            ingredient_uses=[
+                PreparationIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="2",
+                    waste_quantity="0.25",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+            labor_cost="20",
+            other_direct_cost="5",
+            comment="Исправлено",
+        )
+        session.commit()
+
+        assert updated.id == preparation_id
+        assert updated.prepared_on == date(2026, 6, 16)
+        assert updated.preparation_type == thick_dough
+        assert updated.name == "Плотное тесто"
+        assert updated.total_cost == Decimal("185.00")
+        assert updated.unit_cost.quantize(Decimal("0.0001")) == Decimal("123.3333")
+        assert updated.comment == "Исправлено"
+        assert len(updated.ingredient_uses) == 1
+        assert updated.ingredient_uses[0].unit_cost == Decimal("80.0000")
+        assert updated.ingredient_uses[0].quantity == Decimal("2.000")
+        assert updated.ingredient_uses[0].waste_quantity == Decimal("0.250")
+
+
+def test_update_preparation_rejects_used_preparation() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        meat = create_ingredient(session, name="Фарш", unit=kg)
+        filling = create_preparation_type(session, name="Начинка")
+        product = create_product(session, name="Пельмени")
+        preparation = create_preparation(
+            session,
+            prepared_on=date(2026, 6, 14),
+            preparation_type=filling,
+            output_quantity="4",
+            output_unit=kg,
+            ingredient_uses=[PreparationIngredientInput(ingredient=meat, unit=kg, quantity="4", unit_cost="450")],
+        )
+        create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="2",
+            output_unit=kg,
+            preparation_uses=[
+                BatchPreparationInput(
+                    preparation=preparation,
+                    unit=kg,
+                    quantity="1",
+                    unit_cost=preparation.unit_cost,
+                    source_preparation_id=preparation.id,
+                )
+            ],
+            outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=2)],
+        )
+
+        assert is_preparation_used(session, preparation.id)
+        with pytest.raises(ValueError, match="использована в производстве"):
+            update_preparation(
+                session,
+                preparation.id,
+                prepared_on=date(2026, 6, 16),
+                preparation_type=filling,
+                output_quantity="4",
+                output_unit=kg,
+                ingredient_uses=[
+                    PreparationIngredientInput(ingredient=meat, unit=kg, quantity="4", unit_cost="450")
+                ],
+            )
 
 
 def test_create_preparation_rejects_selected_purchase_batch_overdraft() -> None:

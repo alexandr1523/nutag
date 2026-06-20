@@ -7,12 +7,21 @@ from datetime import date
 from decimal import Decimal
 from typing import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from nutag.db.models import Ingredient, Preparation, PreparationIngredientUse, PreparationType, PurchaseItemType, Unit
+from nutag.db.models import (
+    BatchIngredientUse,
+    BatchPreparationUse,
+    Ingredient,
+    Preparation,
+    PreparationIngredientUse,
+    PreparationType,
+    PurchaseItem,
+    PurchaseItemType,
+    Unit,
+)
 from nutag.services.calculations import calculate_preparation_cost, calculate_unit_cost, to_decimal
-from nutag.services.inventory import get_available_purchase_batch
 
 
 @dataclass(frozen=True)
@@ -45,23 +54,69 @@ def calculate_ingredient_use_total(
     return quantity_decimal * unit_cost_decimal
 
 
-def create_preparation(
+def is_preparation_used(session: Session, preparation_id: int) -> bool:
+    """Return whether a preparation is already consumed by production."""
+
+    return session.scalar(
+        select(BatchPreparationUse.id)
+        .where(
+            or_(
+                BatchPreparationUse.source_preparation_id == preparation_id,
+                BatchPreparationUse.preparation_id == preparation_id,
+            )
+        )
+        .limit(1)
+    ) is not None
+
+
+def _get_purchase_unit_cost_for_preparation_line(
     session: Session,
     *,
-    prepared_on: date,
-    preparation_type: PreparationType,
-    output_quantity: Decimal | int | float | str,
-    waste_quantity: Decimal | int | float | str = 0,
-    output_unit: Unit,
-    ingredient_uses: Iterable[PreparationIngredientInput],
-    labor_cost: Decimal | int | float | str = 0,
-    other_direct_cost: Decimal | int | float | str = 0,
-    comment: str | None = None,
-) -> Preparation:
-    """Create an internal preparation and calculate its total and unit cost."""
+    line: PreparationIngredientInput,
+    quantity: Decimal,
+    exclude_preparation_id: int | None,
+) -> Decimal:
+    purchase_item = session.get(PurchaseItem, line.purchase_item_id)
+    if purchase_item is None:
+        raise ValueError("Выбранная партия закупки не найдена")
+    if purchase_item.item_type != PurchaseItemType.INGREDIENT:
+        raise ValueError("Выбранная партия закупки не соответствует типу ингредиента")
+    if purchase_item.ingredient_id != line.ingredient.id:
+        raise ValueError("Выбранная партия закупки не соответствует ингредиенту")
+    if purchase_item.unit.short_name != line.unit.short_name:
+        raise ValueError("Единица измерения выбранной партии закупки не соответствует списанию")
 
+    preparation_query = session.query(func.coalesce(func.sum(PreparationIngredientUse.quantity), 0)).filter(
+        PreparationIngredientUse.purchase_item_id == line.purchase_item_id
+    )
+    if exclude_preparation_id is not None:
+        preparation_query = preparation_query.filter(PreparationIngredientUse.preparation_id != exclude_preparation_id)
+
+    used_in_preparations = Decimal(str(preparation_query.scalar()))
+    used_in_production = Decimal(
+        str(
+            session.query(func.coalesce(func.sum(BatchIngredientUse.quantity), 0))
+            .filter(BatchIngredientUse.purchase_item_id == line.purchase_item_id)
+            .scalar()
+        )
+    )
+    available_quantity = purchase_item.quantity - used_in_preparations - used_in_production
+    if available_quantity < quantity:
+        raise ValueError("Недостаточно остатка в выбранной партии закупки")
+
+    return purchase_item.unit_price
+
+
+def _calculate_preparation_values(
+    session: Session,
+    *,
+    ingredient_uses: Iterable[PreparationIngredientInput],
+    labor_cost: Decimal | int | float | str,
+    other_direct_cost: Decimal | int | float | str,
+    output_quantity: Decimal | int | float | str,
+    exclude_preparation_id: int | None = None,
+) -> tuple[list[PreparationIngredientInput], list[Decimal], list[Decimal], list[Decimal], list[Decimal], Decimal, Decimal]:
     output_quantity_decimal = to_decimal(output_quantity)
-    waste_quantity_decimal = to_decimal(waste_quantity)
     if output_quantity_decimal <= 0:
         raise ValueError("Preparation output quantity must be greater than zero")
 
@@ -91,15 +146,14 @@ def create_preparation(
             line.purchase_item_id,
             Decimal("0"),
         ) + quantity_decimal
-        batch = get_available_purchase_batch(
-            session,
-            purchase_item_id=line.purchase_item_id,
-            expected_item_type=PurchaseItemType.INGREDIENT,
-            expected_item_id=line.ingredient.id,
-            expected_unit_short_name=line.unit.short_name,
-            quantity=reserved_purchase_quantities[line.purchase_item_id],
+        ingredient_unit_costs.append(
+            _get_purchase_unit_cost_for_preparation_line(
+                session,
+                line=line,
+                quantity=reserved_purchase_quantities[line.purchase_item_id],
+                exclude_preparation_id=exclude_preparation_id,
+            )
         )
-        ingredient_unit_costs.append(batch.unit_price)
 
     ingredient_total_costs = [
         calculate_ingredient_use_total(quantity=quantity, unit_cost=unit_cost)
@@ -111,6 +165,50 @@ def create_preparation(
         other_direct_costs=[other_direct_cost],
     )
     unit_cost = calculate_unit_cost(total_cost=total_cost, actual_output=output_quantity_decimal)
+
+    return (
+        ingredient_inputs,
+        ingredient_quantities,
+        ingredient_waste_quantities,
+        ingredient_unit_costs,
+        ingredient_total_costs,
+        total_cost,
+        unit_cost,
+    )
+
+
+def create_preparation(
+    session: Session,
+    *,
+    prepared_on: date,
+    preparation_type: PreparationType,
+    output_quantity: Decimal | int | float | str,
+    waste_quantity: Decimal | int | float | str = 0,
+    output_unit: Unit,
+    ingredient_uses: Iterable[PreparationIngredientInput],
+    labor_cost: Decimal | int | float | str = 0,
+    other_direct_cost: Decimal | int | float | str = 0,
+    comment: str | None = None,
+) -> Preparation:
+    """Create an internal preparation and calculate its total and unit cost."""
+
+    output_quantity_decimal = to_decimal(output_quantity)
+    waste_quantity_decimal = to_decimal(waste_quantity)
+    (
+        ingredient_inputs,
+        ingredient_quantities,
+        ingredient_waste_quantities,
+        ingredient_unit_costs,
+        ingredient_total_costs,
+        total_cost,
+        unit_cost,
+    ) = _calculate_preparation_values(
+        session,
+        ingredient_uses=ingredient_uses,
+        labor_cost=labor_cost,
+        other_direct_cost=other_direct_cost,
+        output_quantity=output_quantity,
+    )
 
     preparation = Preparation(
         prepared_on=prepared_on,
@@ -148,6 +246,85 @@ def create_preparation(
         )
 
     session.add(preparation)
+    session.flush()
+    return preparation
+
+
+def update_preparation(
+    session: Session,
+    preparation_id: int,
+    *,
+    prepared_on: date,
+    preparation_type: PreparationType,
+    output_quantity: Decimal | int | float | str,
+    waste_quantity: Decimal | int | float | str = 0,
+    output_unit: Unit,
+    ingredient_uses: Iterable[PreparationIngredientInput],
+    labor_cost: Decimal | int | float | str = 0,
+    other_direct_cost: Decimal | int | float | str = 0,
+    comment: str | None = None,
+) -> Preparation:
+    """Update an unused preparation and recalculate costs."""
+
+    preparation = session.get(Preparation, preparation_id)
+    if preparation is None:
+        raise ValueError("Заготовка не найдена")
+    if is_preparation_used(session, preparation_id):
+        raise ValueError("Заготовка уже использована в производстве и не может быть изменена")
+
+    output_quantity_decimal = to_decimal(output_quantity)
+    waste_quantity_decimal = to_decimal(waste_quantity)
+    (
+        ingredient_inputs,
+        ingredient_quantities,
+        ingredient_waste_quantities,
+        ingredient_unit_costs,
+        ingredient_total_costs,
+        total_cost,
+        unit_cost,
+    ) = _calculate_preparation_values(
+        session,
+        ingredient_uses=ingredient_uses,
+        labor_cost=labor_cost,
+        other_direct_cost=other_direct_cost,
+        output_quantity=output_quantity,
+        exclude_preparation_id=preparation_id,
+    )
+
+    preparation.prepared_on = prepared_on
+    preparation.preparation_type = preparation_type
+    preparation.name = preparation_type.name
+    preparation.output_quantity = output_quantity_decimal
+    preparation.waste_quantity = waste_quantity_decimal
+    preparation.output_unit = output_unit
+    preparation.labor_cost = to_decimal(labor_cost)
+    preparation.other_direct_cost = to_decimal(other_direct_cost)
+    preparation.total_cost = total_cost
+    preparation.unit_cost = unit_cost
+    preparation.comment = comment
+    preparation.ingredient_uses.clear()
+
+    for line, quantity, waste_quantity, unit_cost, line_total in zip(
+        ingredient_inputs,
+        ingredient_quantities,
+        ingredient_waste_quantities,
+        ingredient_unit_costs,
+        ingredient_total_costs,
+        strict=True,
+    ):
+        preparation.ingredient_uses.append(
+            PreparationIngredientUse(
+                ingredient=line.ingredient,
+                unit=line.unit,
+                purchase_item_id=line.purchase_item_id,
+                quantity=quantity,
+                waste_quantity=waste_quantity,
+                unit_cost=unit_cost,
+                total_cost=line_total,
+                comment=line.comment,
+            )
+        )
+
     session.flush()
     return preparation
 

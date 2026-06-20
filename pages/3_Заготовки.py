@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 
 import streamlit as st
 
@@ -11,7 +12,13 @@ from nutag.db.init_db import initialize_database
 from nutag.db.models import Ingredient, LaborRate, PreparationType, PurchaseItemType, Unit
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.inventory import list_available_stock_batches
-from nutag.services.preparations import PreparationIngredientInput, create_preparation, list_preparations
+from nutag.services.preparations import (
+    PreparationIngredientInput,
+    create_preparation,
+    is_preparation_used,
+    list_preparations,
+    update_preparation,
+)
 
 
 st.set_page_config(page_title="Заготовки | Nutag", page_icon="🥣", layout="wide")
@@ -67,6 +74,310 @@ with tabs[0]:
                             }
                         )
                     st.table(ingredient_rows)
+
+                    if is_preparation_used(db, preparation.id):
+                        st.warning("Заготовка уже использована в производстве, корректировка недоступна.")
+                    else:
+                        with st.expander("Редактировать заготовку"):
+                            preparation_types = db.query(PreparationType).order_by(PreparationType.name).all()
+                            all_units = {unit.short_name: unit for unit in db.query(Unit).all()}
+                            all_ingredients = {ingredient.id: ingredient for ingredient in db.query(Ingredient).all()}
+                            edit_available_batches = [
+                                batch
+                                for batch in list_available_stock_batches(db)
+                                if batch.item_type == PurchaseItemType.INGREDIENT
+                            ]
+                            edit_batches_by_id = {batch.batch_id: batch for batch in edit_available_batches}
+
+                            for use in preparation.ingredient_uses:
+                                if use.purchase_item_id is None or use.purchase_item is None:
+                                    continue
+                                if use.purchase_item_id in edit_batches_by_id:
+                                    batch = edit_batches_by_id[use.purchase_item_id]
+                                    edit_batches_by_id[use.purchase_item_id] = SimpleNamespace(
+                                        batch_id=batch.batch_id,
+                                        item_id=batch.item_id,
+                                        item_name=batch.item_name,
+                                        date=batch.date,
+                                        unit_short_name=batch.unit_short_name,
+                                        current_quantity=batch.current_quantity + use.quantity,
+                                        unit_price=batch.unit_price,
+                                    )
+                                else:
+                                    edit_batches_by_id[use.purchase_item_id] = SimpleNamespace(
+                                        batch_id=use.purchase_item_id,
+                                        item_id=use.ingredient_id,
+                                        item_name=use.ingredient.name,
+                                        date=use.purchase_item.purchase.purchase_date,
+                                        unit_short_name=use.unit.short_name,
+                                        current_quantity=use.quantity,
+                                        unit_price=use.purchase_item.unit_price,
+                                    )
+
+                            edit_batch_options = {
+                                (
+                                    f"#{batch.batch_id} {batch.date} - {batch.item_name} "
+                                    f"(Доступно для корректировки: {batch.current_quantity} {batch.unit_short_name})"
+                                ): batch
+                                for batch in sorted(
+                                    edit_batches_by_id.values(),
+                                    key=lambda batch: (batch.item_name, batch.date, batch.batch_id),
+                                )
+                            }
+                            edit_preparation_type_options = {
+                                preparation_type.name: preparation_type for preparation_type in preparation_types
+                            }
+
+                            def edit_key(name: str, idx: int | None = None) -> str:
+                                suffix = f"_{idx}" if idx is not None else ""
+                                return f"preparation_edit_{preparation.id}_{name}{suffix}"
+
+                            edit_c1, edit_c2, edit_c3 = st.columns(3)
+                            with edit_c1:
+                                edit_date = st.date_input(
+                                    "Дата приготовления",
+                                    value=preparation.prepared_on,
+                                    key=edit_key("date"),
+                                )
+                            with edit_c2:
+                                edit_type_names = list(edit_preparation_type_options.keys())
+                                current_type_name = preparation.preparation_type.name if preparation.preparation_type else preparation.name
+                                edit_type = st.selectbox(
+                                    "Вид заготовки",
+                                    options=edit_type_names,
+                                    index=edit_type_names.index(current_type_name) if current_type_name in edit_type_names else 0,
+                                    key=edit_key("type"),
+                                )
+                            with edit_c3:
+                                edit_comment = st.text_area(
+                                    "Комментарий",
+                                    value=preparation.comment or "",
+                                    key=edit_key("comment"),
+                                )
+
+                            edit_o1, edit_o2, edit_o3, edit_o4 = st.columns(4)
+                            with edit_o1:
+                                edit_output_qty = st.number_input(
+                                    "Кол-во на выходе (годное)",
+                                    min_value=0.0,
+                                    step=0.1,
+                                    format="%.3f",
+                                    value=float(preparation.output_quantity),
+                                    key=edit_key("output_qty"),
+                                )
+                            with edit_o2:
+                                unit_names = list(all_units.keys())
+                                edit_output_unit = st.selectbox(
+                                    "Ед. изм.",
+                                    options=unit_names,
+                                    index=unit_names.index(preparation.output_unit.short_name)
+                                    if preparation.output_unit.short_name in unit_names
+                                    else 0,
+                                    key=edit_key("output_unit"),
+                                )
+                            with edit_o3:
+                                edit_labor_cost = st.number_input(
+                                    "Труд (сумма)",
+                                    min_value=0.0,
+                                    step=10.0,
+                                    format="%.2f",
+                                    value=float(preparation.labor_cost),
+                                    key=edit_key("labor_cost"),
+                                )
+                            with edit_o4:
+                                edit_other_cost = st.number_input(
+                                    "Прочие расходы",
+                                    min_value=0.0,
+                                    step=10.0,
+                                    format="%.2f",
+                                    value=float(preparation.other_direct_cost),
+                                    key=edit_key("other_cost"),
+                                )
+
+                            edit_ingredient_uses = []
+                            edit_validation_errors: list[str] = []
+                            edit_requested_quantities_by_batch: dict[int, Decimal] = {}
+                            edit_rows = list(preparation.ingredient_uses)
+                            row_count = max(5, len(edit_rows))
+                            for idx in range(row_count):
+                                existing_use = edit_rows[idx] if idx < len(edit_rows) else None
+                                st.markdown(f"**Ингредиент {idx + 1}**")
+                                ea, eb, ec, ed, ee, ef = st.columns([4, 1, 2, 2, 2, 2.5])
+                                batch_labels = [""] + list(edit_batch_options.keys())
+                                current_label = ""
+                                if existing_use and existing_use.purchase_item_id is not None:
+                                    current_label = next(
+                                        (
+                                            label
+                                            for label, batch in edit_batch_options.items()
+                                            if batch.batch_id == existing_use.purchase_item_id
+                                        ),
+                                        "",
+                                    )
+                                with ea:
+                                    edit_batch_label = st.selectbox(
+                                        f"Выбор партии {idx + 1}",
+                                        options=batch_labels,
+                                        index=batch_labels.index(current_label) if current_label in batch_labels else 0,
+                                        key=edit_key("batch", idx),
+                                    )
+
+                                edit_selected_batch = edit_batch_options.get(edit_batch_label)
+                                edit_selected_ingredient = (
+                                    all_ingredients.get(edit_selected_batch.item_id) if edit_selected_batch else None
+                                )
+                                edit_ingredient_unit = (
+                                    edit_selected_ingredient.unit.short_name if edit_selected_ingredient else ""
+                                )
+                                edit_batch_unit = edit_selected_batch.unit_short_name if edit_selected_batch else ""
+                                edit_default_price = float(edit_selected_batch.unit_price) if edit_selected_batch else 0.0
+                                edit_qty_default = float(existing_use.quantity) if existing_use else 0.0
+                                edit_waste_default = float(existing_use.waste_quantity) if existing_use else 0.0
+
+                                with eb:
+                                    st.caption("Ед. авто")
+                                    st.write(edit_ingredient_unit or "—")
+                                with ec:
+                                    edit_qty = st.number_input(
+                                        f"Кол-во {idx + 1}",
+                                        min_value=0.0,
+                                        step=0.1,
+                                        format="%.3f",
+                                        value=edit_qty_default,
+                                        key=edit_key("qty", idx),
+                                    )
+                                with ed:
+                                    edit_waste_qty = st.number_input(
+                                        f"Отходы {idx + 1}",
+                                        min_value=0.0,
+                                        step=0.1,
+                                        format="%.3f",
+                                        value=edit_waste_default,
+                                        key=edit_key("waste", idx),
+                                    )
+                                with ee:
+                                    edit_qty_decimal = Decimal(str(edit_qty))
+                                    edit_waste_decimal = Decimal(str(edit_waste_qty))
+                                    edit_useful_qty = edit_qty_decimal - edit_waste_decimal
+                                    st.metric(f"Полезно {idx + 1}", f"{edit_useful_qty:,.3f}")
+                                with ef:
+                                    edit_line_total = edit_qty_decimal * Decimal(str(edit_default_price))
+                                    st.metric(f"Стоимость списания {idx + 1}", f"{edit_line_total:,.2f}")
+                                    if edit_useful_qty > 0 and edit_ingredient_unit:
+                                        st.caption(
+                                            f"Себест. полезного: {edit_line_total / edit_useful_qty:,.2f}/"
+                                            f"{edit_ingredient_unit}"
+                                        )
+
+                                if edit_selected_batch is None and (edit_qty_decimal > 0 or edit_waste_decimal > 0):
+                                    edit_validation_errors.append(
+                                        f"Строка {idx + 1}: выберите партию ингредиента или очистите количество и отходы."
+                                    )
+                                    continue
+                                if edit_selected_batch is not None and edit_qty_decimal <= 0:
+                                    edit_validation_errors.append(
+                                        f"Строка {idx + 1}: укажите количество больше 0 или очистите строку."
+                                    )
+                                    continue
+                                if edit_selected_batch is None:
+                                    continue
+                                if edit_waste_decimal > edit_qty_decimal:
+                                    edit_validation_errors.append(
+                                        f"Строка {idx + 1}: отходы не могут быть больше расхода ингредиента."
+                                    )
+                                    continue
+                                if edit_selected_ingredient is None:
+                                    edit_validation_errors.append(
+                                        f"Строка {idx + 1}: ингредиент партии отсутствует в справочнике."
+                                    )
+                                    continue
+                                if edit_ingredient_unit not in all_units:
+                                    edit_validation_errors.append(
+                                        f"Строка {idx + 1}: единица измерения ингредиента отсутствует в справочнике."
+                                    )
+                                    continue
+                                if edit_batch_unit != edit_ingredient_unit:
+                                    edit_validation_errors.append(
+                                        f"Строка {idx + 1}: единица партии ({edit_batch_unit}) не совпадает "
+                                        f"с единицей ингредиента ({edit_ingredient_unit})."
+                                    )
+                                    continue
+
+                                edit_requested_quantities_by_batch[edit_selected_batch.batch_id] = (
+                                    edit_requested_quantities_by_batch.get(edit_selected_batch.batch_id, Decimal("0"))
+                                    + edit_qty_decimal
+                                )
+                                if edit_qty_decimal > Decimal(str(edit_selected_batch.current_quantity)):
+                                    edit_validation_errors.append(
+                                        f"Строка {idx + 1}: количество больше доступного остатка партии."
+                                    )
+                                    continue
+
+                                edit_ingredient_uses.append(
+                                    PreparationIngredientInput(
+                                        ingredient=edit_selected_ingredient,
+                                        unit=all_units[edit_ingredient_unit],
+                                        quantity=edit_qty_decimal,
+                                        unit_cost=Decimal(str(edit_default_price)),
+                                        waste_quantity=edit_waste_decimal,
+                                        purchase_item_id=edit_selected_batch.batch_id,
+                                    )
+                                )
+
+                            for batch_id, requested_quantity in edit_requested_quantities_by_batch.items():
+                                batch = edit_batches_by_id[batch_id]
+                                if requested_quantity > Decimal(str(batch.current_quantity)):
+                                    edit_validation_errors.append(
+                                        f"Суммарное количество по партии '{batch.item_name}' больше доступного остатка."
+                                    )
+
+                            if st.button("Сохранить изменения", key=edit_key("save"), type="primary"):
+                                submit_errors = []
+                                if edit_output_qty <= 0:
+                                    submit_errors.append("Количество на выходе должно быть больше 0.")
+                                if not edit_ingredient_uses and not edit_validation_errors:
+                                    submit_errors.append("Добавьте хотя бы один ингредиент.")
+                                submit_errors.extend(edit_validation_errors)
+
+                                if submit_errors:
+                                    for error in submit_errors:
+                                        st.error(error)
+                                else:
+                                    try:
+                                        with SessionLocal() as db_write:
+                                            db_preparation_type = db_write.merge(
+                                                edit_preparation_type_options[edit_type]
+                                            )
+                                            db_output_unit = db_write.merge(all_units[edit_output_unit])
+                                            db_ingredient_uses = [
+                                                PreparationIngredientInput(
+                                                    ingredient=db_write.merge(use.ingredient),
+                                                    unit=db_write.merge(use.unit),
+                                                    quantity=use.quantity,
+                                                    unit_cost=use.unit_cost,
+                                                    waste_quantity=use.waste_quantity,
+                                                    purchase_item_id=use.purchase_item_id,
+                                                )
+                                                for use in edit_ingredient_uses
+                                            ]
+                                            update_preparation(
+                                                db_write,
+                                                preparation.id,
+                                                prepared_on=edit_date,
+                                                preparation_type=db_preparation_type,
+                                                output_quantity=Decimal(str(edit_output_qty)),
+                                                waste_quantity=Decimal("0"),
+                                                output_unit=db_output_unit,
+                                                ingredient_uses=db_ingredient_uses,
+                                                labor_cost=Decimal(str(edit_labor_cost)),
+                                                other_direct_cost=Decimal(str(edit_other_cost)),
+                                                comment=edit_comment,
+                                            )
+                                            db_write.commit()
+                                            st.success("Заготовка обновлена.")
+                                            st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Ошибка при сохранении: {e}")
         else:
             st.info("История заготовок пуста")
 
