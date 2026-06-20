@@ -10,7 +10,18 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from nutag.db.models import Ingredient, Packaging, Consumable, Purchase, PurchaseItem, PurchaseItemType, Unit
+from nutag.db.models import (
+    BatchIngredientUse,
+    BatchPackagingUse,
+    Consumable,
+    Ingredient,
+    Packaging,
+    PreparationIngredientUse,
+    Purchase,
+    PurchaseItem,
+    PurchaseItemType,
+    Unit,
+)
 from nutag.services.calculations import to_decimal
 
 
@@ -119,6 +130,130 @@ def create_purchase(
     session.add(purchase)
     session.flush()
     return purchase
+
+
+def purchase_item_has_stock_usage(session: Session, item: PurchaseItem) -> bool:
+    """Return whether a purchase item is already consumed by stock operations."""
+
+    if item.id is None:
+        return False
+
+    linked_queries = [
+        select(PreparationIngredientUse.id).where(PreparationIngredientUse.purchase_item_id == item.id),
+        select(BatchIngredientUse.id).where(BatchIngredientUse.purchase_item_id == item.id),
+        select(BatchPackagingUse.id).where(BatchPackagingUse.purchase_item_id == item.id),
+    ]
+    if any(session.scalar(query.limit(1)) is not None for query in linked_queries):
+        return True
+
+    item_type = PurchaseItemType(item.item_type)
+    if item_type == PurchaseItemType.INGREDIENT and item.ingredient_id is not None:
+        legacy_queries = [
+            select(PreparationIngredientUse.id).where(
+                PreparationIngredientUse.purchase_item_id.is_(None),
+                PreparationIngredientUse.ingredient_id == item.ingredient_id,
+            ),
+            select(BatchIngredientUse.id).where(
+                BatchIngredientUse.purchase_item_id.is_(None),
+                BatchIngredientUse.ingredient_id == item.ingredient_id,
+            ),
+        ]
+        return any(session.scalar(query.limit(1)) is not None for query in legacy_queries)
+
+    if item_type == PurchaseItemType.PACKAGING and item.packaging_id is not None:
+        return (
+            session.scalar(
+                select(BatchPackagingUse.id)
+                .where(
+                    BatchPackagingUse.purchase_item_id.is_(None),
+                    BatchPackagingUse.packaging_id == item.packaging_id,
+                )
+                .limit(1)
+            )
+            is not None
+        )
+
+    return False
+
+
+def purchase_has_stock_usage(session: Session, purchase: Purchase) -> bool:
+    """Return whether any purchase batch is already consumed."""
+
+    return any(purchase_item_has_stock_usage(session, item) for item in purchase.items)
+
+
+def update_purchase(
+    session: Session,
+    purchase_id: int,
+    *,
+    purchase_date: date,
+    lines: Iterable[PurchaseLineInput],
+    supplier: str | None = None,
+    purchased_by: str | None = None,
+    shopping_minutes: int | None = None,
+    transport_cost: Decimal | int | float | str = 0,
+    comment: str | None = None,
+) -> Purchase:
+    """Update an unused purchase while preserving batch traceability."""
+
+    purchase = session.get(Purchase, purchase_id)
+    if purchase is None:
+        raise ValueError("Закупка не найдена")
+    if purchase_has_stock_usage(session, purchase):
+        raise ValueError("Нельзя редактировать закупку: одна или несколько партий уже использованы")
+
+    line_inputs = list(lines)
+    if not line_inputs:
+        raise ValueError("Закупка должна содержать хотя бы одну позицию")
+
+    new_items = []
+    for index, line in enumerate(line_inputs, start=1):
+        validate_purchase_line_source(line)
+        total_price = calculate_purchase_line_total(
+            quantity=line.quantity,
+            unit_price=line.unit_price,
+        )
+        new_items.append(
+            PurchaseItem(
+                line_number=index,
+                item_type=line.item_type,
+                ingredient_id=line.ingredient.id if line.ingredient else None,
+                packaging_id=line.packaging.id if line.packaging else None,
+                consumable_id=line.consumable.id if line.consumable else None,
+                item_name=line.item_name,
+                unit_id=line.unit.id,
+                quantity=to_decimal(line.quantity),
+                unit_price=to_decimal(line.unit_price),
+                total_price=total_price,
+                expires_on=line.expires_on,
+                comment=line.comment,
+            )
+        )
+
+    purchase.purchase_date = purchase_date
+    purchase.supplier = supplier
+    purchase.purchased_by = purchased_by
+    purchase.shopping_minutes = shopping_minutes
+    purchase.transport_cost = to_decimal(transport_cost)
+    purchase.comment = comment
+    purchase.items.clear()
+    session.flush()
+    purchase.items.extend(new_items)
+    session.flush()
+    return purchase
+
+
+def delete_purchase(session: Session, purchase_id: int) -> None:
+    """Delete an unused purchase while protecting consumed batches."""
+
+    purchase = session.get(Purchase, purchase_id)
+    if purchase is None:
+        raise ValueError("Закупка не найдена")
+    if purchase_has_stock_usage(session, purchase):
+        raise ValueError("Нельзя удалить закупку: одна или несколько партий уже использованы")
+
+    session.delete(purchase)
+    session.flush()
 
 
 def list_purchases(session: Session) -> list[Purchase]:

@@ -5,7 +5,16 @@ import pytest
 
 from nutag.db import create_database, create_engine_for_url, create_session_factory
 from nutag.db.models import Consumable, PurchaseItemType
-from nutag.services.purchases import PurchaseLineInput, calculate_purchase_line_total, create_purchase, list_purchases
+from nutag.services.preparations import PreparationIngredientInput, create_preparation
+from nutag.services.purchases import (
+    PurchaseLineInput,
+    calculate_purchase_line_total,
+    create_purchase,
+    delete_purchase,
+    list_purchases,
+    purchase_has_stock_usage,
+    update_purchase,
+)
 from nutag.services.references import (
     create_ingredient,
     create_packaging,
@@ -241,3 +250,144 @@ def test_purchase_service_accepts_consumable_line() -> None:
         assert purchase.items[0].consumable_id == gloves.id
         assert purchase.items[0].ingredient_id is None
         assert purchase.items[0].packaging_id is None
+
+
+def test_purchase_service_updates_unused_purchase() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            supplier="Старый поставщик",
+            transport_cost="10",
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="2",
+                    unit_price="80",
+                )
+            ],
+        )
+
+        update_purchase(
+            session,
+            purchase.id,
+            purchase_date=date(2026, 6, 15),
+            supplier="Новый поставщик",
+            purchased_by="Кристина",
+            transport_cost="25",
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="3",
+                    unit_price="90",
+                )
+            ],
+        )
+        session.commit()
+
+    with session_factory() as session:
+        saved = list_purchases(session)[0]
+        assert saved.purchase_date == date(2026, 6, 15)
+        assert saved.supplier == "Новый поставщик"
+        assert saved.purchased_by == "Кристина"
+        assert saved.transport_cost == Decimal("25.00")
+        assert saved.items[0].quantity == Decimal("3.000")
+        assert saved.items[0].unit_price == Decimal("90.00")
+        assert saved.items[0].total_price == Decimal("270.00")
+
+
+def test_purchase_service_deletes_unused_purchase() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="2",
+                    unit_price="80",
+                )
+            ],
+        )
+
+        delete_purchase(session, purchase.id)
+        session.commit()
+
+    with session_factory() as session:
+        assert list_purchases(session) == []
+
+
+def test_purchase_service_rejects_update_and_delete_for_used_purchase_batch() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        dough = create_preparation_type(session, name="Тесто")
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="2",
+                    unit_price="80",
+                )
+            ],
+        )
+        create_preparation(
+            session,
+            prepared_on=date(2026, 6, 15),
+            preparation_type=dough,
+            output_quantity="1",
+            output_unit=kg,
+            ingredient_uses=[
+                PreparationIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="1",
+                    unit_cost="80",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+        )
+
+        assert purchase_has_stock_usage(session, purchase)
+        with pytest.raises(ValueError, match="использованы"):
+            update_purchase(
+                session,
+                purchase.id,
+                purchase_date=date(2026, 6, 16),
+                lines=[
+                    PurchaseLineInput(
+                        item_type=PurchaseItemType.INGREDIENT,
+                        ingredient=flour,
+                        item_name=flour.name,
+                        unit=kg,
+                        quantity="2",
+                        unit_price="90",
+                    )
+                ],
+            )
+        with pytest.raises(ValueError, match="использованы"):
+            delete_purchase(session, purchase.id)

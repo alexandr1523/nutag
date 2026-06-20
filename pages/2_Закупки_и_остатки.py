@@ -11,7 +11,14 @@ from nutag.db.init_db import initialize_database
 from nutag.db.models import Consumable, Ingredient, Packaging, PurchaseItemType, Unit
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.inventory import list_available_stock_batches, list_inventory_balances
-from nutag.services.purchases import PurchaseLineInput, create_purchase, list_purchases
+from nutag.services.purchases import (
+    PurchaseLineInput,
+    create_purchase,
+    delete_purchase,
+    list_purchases,
+    purchase_has_stock_usage,
+    update_purchase,
+)
 
 
 def make_default_purchase_rows(default_unit: str) -> list[dict[str, object]]:
@@ -139,6 +146,145 @@ with tabs[2]:
                             }
                         )
                     st.table(items_data)
+
+                    if purchase_has_stock_usage(db, p):
+                        st.warning(
+                            "Редактирование и удаление заблокированы: одна или несколько партий из этой закупки уже использованы."
+                        )
+                    else:
+                        st.info(
+                            "Можно исправить дату, поставщика, закупившего, транспорт, комментарий, количество и цену. "
+                            "Состав строк пока фиксированный."
+                        )
+                        with st.form(f"edit_purchase_{p.id}"):
+                            edit_col1, edit_col2, edit_col3 = st.columns(3)
+                            with edit_col1:
+                                edit_purchase_date = st.date_input(
+                                    "Дата закупки",
+                                    value=p.purchase_date,
+                                    key=f"edit_purchase_date_{p.id}",
+                                )
+                            with edit_col2:
+                                edit_supplier = st.text_input(
+                                    "Поставщик",
+                                    value=p.supplier or "",
+                                    key=f"edit_supplier_{p.id}",
+                                )
+                            with edit_col3:
+                                edit_purchased_by = st.text_input(
+                                    "Кто закупил",
+                                    value=p.purchased_by or "",
+                                    key=f"edit_purchased_by_{p.id}",
+                                )
+
+                            edit_transport_cost = st.number_input(
+                                "Транспортные расходы",
+                                min_value=0.0,
+                                step=10.0,
+                                format="%.2f",
+                                value=float(p.transport_cost),
+                                key=f"edit_transport_cost_{p.id}",
+                            )
+                            edit_comment = st.text_area(
+                                "Комментарий",
+                                value=p.comment or "",
+                                key=f"edit_comment_{p.id}",
+                            )
+
+                            edited_lines = []
+                            st.markdown("**Позиции закупки**")
+                            for item in p.items:
+                                line_col1, line_col2, line_col3, line_col4, line_col5 = st.columns([3, 1, 1, 1, 1])
+                                with line_col1:
+                                    st.text_input(
+                                        f"Позиция {item.line_number}",
+                                        value=item.item_name,
+                                        disabled=True,
+                                        key=f"edit_item_name_{item.id}",
+                                    )
+                                with line_col2:
+                                    edit_quantity = st.number_input(
+                                        f"Кол-во {item.line_number}",
+                                        min_value=0.001,
+                                        step=0.1,
+                                        format="%.3f",
+                                        value=float(item.quantity),
+                                        key=f"edit_item_qty_{item.id}",
+                                    )
+                                with line_col3:
+                                    st.text_input(
+                                        f"Ед. {item.line_number}",
+                                        value=item.unit.short_name,
+                                        disabled=True,
+                                        key=f"edit_item_unit_{item.id}",
+                                    )
+                                with line_col4:
+                                    edit_unit_price = st.number_input(
+                                        f"Цена/ед {item.line_number}",
+                                        min_value=0.0,
+                                        step=1.0,
+                                        format="%.2f",
+                                        value=float(item.unit_price),
+                                        key=f"edit_item_price_{item.id}",
+                                    )
+                                with line_col5:
+                                    st.metric(
+                                        f"Итого {item.line_number}",
+                                        f"{Decimal(str(edit_quantity)) * Decimal(str(edit_unit_price)):,.2f}",
+                                    )
+
+                                edited_lines.append(
+                                    PurchaseLineInput(
+                                        item_type=PurchaseItemType(item.item_type),
+                                        item_name=item.item_name,
+                                        unit=item.unit,
+                                        quantity=Decimal(str(edit_quantity)),
+                                        unit_price=Decimal(str(edit_unit_price)),
+                                        ingredient=item.ingredient,
+                                        packaging=item.packaging,
+                                        consumable=item.consumable,
+                                        expires_on=item.expires_on,
+                                        comment=item.comment,
+                                    )
+                                )
+
+                            if st.form_submit_button("Сохранить изменения"):
+                                try:
+                                    update_purchase(
+                                        db,
+                                        p.id,
+                                        purchase_date=edit_purchase_date,
+                                        lines=edited_lines,
+                                        supplier=edit_supplier or None,
+                                        purchased_by=edit_purchased_by or None,
+                                        shopping_minutes=p.shopping_minutes,
+                                        transport_cost=Decimal(str(edit_transport_cost)),
+                                        comment=edit_comment or None,
+                                    )
+                                    db.commit()
+                                    st.success("Закупка обновлена.")
+                                    st.rerun()
+                                except Exception as e:
+                                    db.rollback()
+                                    st.error(f"Ошибка при обновлении закупки: {e}")
+
+                        with st.form(f"delete_purchase_{p.id}"):
+                            confirm_delete = st.checkbox(
+                                "Подтверждаю удаление этой закупки",
+                                key=f"confirm_delete_purchase_{p.id}",
+                            )
+                            if st.form_submit_button("Удалить закупку"):
+                                if not confirm_delete:
+                                    st.error("Для удаления отметьте подтверждение.")
+                                else:
+                                    try:
+                                        delete_purchase(db, p.id)
+                                        db.commit()
+                                        st.success("Закупка удалена.")
+                                        st.rerun()
+                                    except Exception as e:
+                                        db.rollback()
+                                        st.error(f"Ошибка при удалении закупки: {e}")
         else:
             st.info("История закупок пуста")
 
