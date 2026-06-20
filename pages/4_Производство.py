@@ -152,7 +152,7 @@ with tabs[1]:
         if not all_products:
             st.warning("Сначала добавьте продукты в Справочниках")
         else:
-            with st.form("new_batch_form"):
+            with st.container():
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     batch_date = st.date_input("Дата производства", value=date.today())
@@ -210,8 +210,11 @@ with tabs[1]:
                     with cc:
                         qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"bi_qty_{i}")
                     with cd:
-                        st.write("Цена:")
-                        st.info(f"{def_price:,.2f}")
+                        line_total = Decimal(str(qty)) * Decimal(str(def_price))
+                        st.write("Стоимость списания:")
+                        st.info(f"{line_total:,.2f}")
+                        if selected_i_batch:
+                            st.caption(f"Цена партии: {def_price:,.2f}/{def_unit}")
 
                     if selected_i_batch and qty > 0:
                         ing_uses.append(
@@ -324,7 +327,7 @@ with tabs[1]:
                             )
                         )
 
-                submitted = st.form_submit_button("Сохранить партию")
+                submitted = st.button("Сохранить партию", type="primary")
                 if submitted:
                     if actual_qty <= 0:
                         st.error("Фактический выход должен быть больше 0")
