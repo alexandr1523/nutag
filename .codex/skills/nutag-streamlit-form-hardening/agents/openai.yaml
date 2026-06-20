@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nutag Streamlit Forms"
+  short_description: "Harden Nutag Streamlit form behavior"
+  default_prompt: "Use $nutag-streamlit-form-hardening to harden a Nutag Streamlit form."

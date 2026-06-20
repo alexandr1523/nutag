@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nutag Batch Inventory"
+  short_description: "Protect batch-based inventory workflows"
+  default_prompt: "Use $nutag-batch-inventory-workflow to implement a Nutag inventory change safely."
