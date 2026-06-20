@@ -20,9 +20,11 @@ from nutag.db.models import (
     Preparation,
     Product,
     ProductionBatch,
+    PurchaseItemType,
     Unit,
 )
 from nutag.services.calculations import calculate_batch_cost, calculate_unit_cost, to_decimal
+from nutag.services.inventory import get_available_preparation_batch, get_available_purchase_batch
 from nutag.services.preparations import calculate_ingredient_use_total
 
 
@@ -123,14 +125,78 @@ def create_production_batch(
     preparation_inputs = list(preparation_uses)
     packaging_inputs = list(packaging_uses)
 
+    ingredient_unit_costs = []
+    reserved_purchase_quantities: dict[int, Decimal] = {}
+    for line in ingredient_inputs:
+        if line.purchase_item_id is None:
+            ingredient_unit_costs.append(to_decimal(line.unit_cost))
+            continue
+
+        reserved_purchase_quantities[line.purchase_item_id] = reserved_purchase_quantities.get(
+            line.purchase_item_id,
+            Decimal("0"),
+        ) + to_decimal(line.quantity)
+        batch = get_available_purchase_batch(
+            session,
+            purchase_item_id=line.purchase_item_id,
+            expected_item_type=PurchaseItemType.INGREDIENT,
+            expected_item_id=line.ingredient.id,
+            expected_unit_short_name=line.unit.short_name,
+            quantity=reserved_purchase_quantities[line.purchase_item_id],
+        )
+        ingredient_unit_costs.append(batch.unit_price)
+
+    preparation_unit_costs = []
+    reserved_preparation_quantities: dict[int, Decimal] = {}
+    for line in preparation_inputs:
+        if line.source_preparation_id is None:
+            preparation_unit_costs.append(to_decimal(line.unit_cost))
+            continue
+
+        reserved_preparation_quantities[line.source_preparation_id] = reserved_preparation_quantities.get(
+            line.source_preparation_id,
+            Decimal("0"),
+        ) + to_decimal(line.quantity)
+        batch = get_available_preparation_batch(
+            session,
+            source_preparation_id=line.source_preparation_id,
+            expected_preparation_name=line.preparation.name,
+            expected_unit_short_name=line.unit.short_name,
+            quantity=reserved_preparation_quantities[line.source_preparation_id],
+        )
+        preparation_unit_costs.append(batch.unit_price)
+
+    packaging_unit_costs = []
+    for line in packaging_inputs:
+        if line.purchase_item_id is None:
+            packaging_unit_costs.append(to_decimal(line.unit_cost))
+            continue
+
+        reserved_purchase_quantities[line.purchase_item_id] = reserved_purchase_quantities.get(
+            line.purchase_item_id,
+            Decimal("0"),
+        ) + to_decimal(line.quantity)
+        batch = get_available_purchase_batch(
+            session,
+            purchase_item_id=line.purchase_item_id,
+            expected_item_type=PurchaseItemType.PACKAGING,
+            expected_item_id=line.packaging.id,
+            expected_unit_short_name=line.unit.short_name,
+            quantity=reserved_purchase_quantities[line.purchase_item_id],
+        )
+        packaging_unit_costs.append(batch.unit_price)
+
     ingredient_total_costs = [
-        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=line.unit_cost) for line in ingredient_inputs
+        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=unit_cost)
+        for line, unit_cost in zip(ingredient_inputs, ingredient_unit_costs, strict=True)
     ]
     preparation_total_costs = [
-        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=line.unit_cost) for line in preparation_inputs
+        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=unit_cost)
+        for line, unit_cost in zip(preparation_inputs, preparation_unit_costs, strict=True)
     ]
     packaging_total_costs = [
-        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=line.unit_cost) for line in packaging_inputs
+        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=unit_cost)
+        for line, unit_cost in zip(packaging_inputs, packaging_unit_costs, strict=True)
     ]
     
     total_cost = calculate_batch_cost(
@@ -160,40 +226,45 @@ def create_production_batch(
         comment=comment,
     )
 
-    for line, line_total in zip(ingredient_inputs, ingredient_total_costs, strict=True):
+    for line, unit_cost, line_total in zip(ingredient_inputs, ingredient_unit_costs, ingredient_total_costs, strict=True):
         batch.ingredient_uses.append(
             BatchIngredientUse(
                 ingredient=line.ingredient,
                 purchase_item_id=line.purchase_item_id,
                 unit=line.unit,
                 quantity=to_decimal(line.quantity),
-                unit_cost=to_decimal(line.unit_cost),
+                unit_cost=unit_cost,
                 total_cost=line_total,
                 comment=line.comment,
             )
         )
 
-    for line, line_total in zip(preparation_inputs, preparation_total_costs, strict=True):
+    for line, unit_cost, line_total in zip(
+        preparation_inputs,
+        preparation_unit_costs,
+        preparation_total_costs,
+        strict=True,
+    ):
         batch.preparation_uses.append(
             BatchPreparationUse(
                 preparation=line.preparation,
                 source_preparation_id=line.source_preparation_id,
                 unit=line.unit,
                 quantity=to_decimal(line.quantity),
-                unit_cost=to_decimal(line.unit_cost),
+                unit_cost=unit_cost,
                 total_cost=line_total,
                 comment=line.comment,
             )
         )
         
-    for line, line_total in zip(packaging_inputs, packaging_total_costs, strict=True):
+    for line, unit_cost, line_total in zip(packaging_inputs, packaging_unit_costs, packaging_total_costs, strict=True):
         batch.packaging_uses.append(
             BatchPackagingUse(
                 packaging=line.packaging,
                 purchase_item_id=line.purchase_item_id,
                 unit=line.unit,
                 quantity=to_decimal(line.quantity),
-                unit_cost=to_decimal(line.unit_cost),
+                unit_cost=unit_cost,
                 total_cost=line_total,
                 comment=line.comment,
             )

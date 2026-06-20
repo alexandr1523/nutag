@@ -221,3 +221,129 @@ def test_create_production_batch_persists_selected_source_batch_ids() -> None:
         assert saved.ingredient_uses[0].purchase_item_id == ingredient_purchase_item.id
         assert saved.preparation_uses[0].source_preparation_id == preparation.id
         assert saved.packaging_uses[0].purchase_item_id == packaging_purchase_item.id
+
+
+def test_create_production_batch_uses_selected_source_prices() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        piece = create_unit(session, name="piece", short_name="pcs")
+        product = create_product(session, name="Пельмени")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        meat = create_ingredient(session, name="Фарш", unit=kg)
+        container = create_packaging(session, name="Контейнер", unit=piece)
+        filling = create_preparation_type(session, name="Начинка")
+
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 13),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="10",
+                    unit_price="80",
+                ),
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.PACKAGING,
+                    packaging=container,
+                    item_name=container.name,
+                    unit=piece,
+                    quantity="10",
+                    unit_price="5",
+                ),
+            ],
+        )
+        preparation = create_preparation(
+            session,
+            prepared_on=date(2026, 6, 14),
+            preparation_type=filling,
+            output_quantity="4",
+            output_unit=kg,
+            ingredient_uses=[PreparationIngredientInput(ingredient=meat, unit=kg, quantity="4", unit_cost="100")],
+        )
+
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="1",
+            output_unit=kg,
+            ingredient_uses=[
+                BatchIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="2",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+            preparation_uses=[
+                BatchPreparationInput(
+                    preparation=preparation,
+                    unit=kg,
+                    quantity="2",
+                    unit_cost="999",
+                    source_preparation_id=preparation.id,
+                )
+            ],
+            packaging_uses=[
+                BatchPackagingInput(
+                    packaging=container,
+                    unit=piece,
+                    quantity="2",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[1].id,
+                )
+            ],
+            outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=1)],
+        )
+        session.commit()
+
+        assert batch.ingredient_uses[0].unit_cost == Decimal("80.0000")
+        assert batch.ingredient_uses[0].total_cost == Decimal("160.00")
+        assert batch.preparation_uses[0].unit_cost == Decimal("100.0000")
+        assert batch.preparation_uses[0].total_cost == Decimal("200.00")
+        assert batch.packaging_uses[0].unit_cost == Decimal("5.0000")
+        assert batch.packaging_uses[0].total_cost == Decimal("10.00")
+        assert batch.total_cost == Decimal("370.00")
+
+
+def test_create_production_batch_rejects_selected_preparation_overdraft() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        product = create_product(session, name="Пельмени")
+        meat = create_ingredient(session, name="Фарш", unit=kg)
+        filling = create_preparation_type(session, name="Начинка")
+        preparation = create_preparation(
+            session,
+            prepared_on=date(2026, 6, 14),
+            preparation_type=filling,
+            output_quantity="1",
+            output_unit=kg,
+            ingredient_uses=[PreparationIngredientInput(ingredient=meat, unit=kg, quantity="1", unit_cost="100")],
+        )
+
+        with pytest.raises(ValueError, match="Недостаточно остатка"):
+            create_production_batch(
+                session,
+                produced_on=date(2026, 6, 15),
+                product=product,
+                actual_output_quantity="1",
+                output_unit=kg,
+                preparation_uses=[
+                    BatchPreparationInput(
+                        preparation=preparation,
+                        unit=kg,
+                        quantity="2",
+                        unit_cost=preparation.unit_cost,
+                        source_preparation_id=preparation.id,
+                    )
+                ],
+                outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=1)],
+            )

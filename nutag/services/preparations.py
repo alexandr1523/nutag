@@ -10,8 +10,9 @@ from typing import Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from nutag.db.models import Ingredient, Preparation, PreparationIngredientUse, PreparationType, Unit
+from nutag.db.models import Ingredient, Preparation, PreparationIngredientUse, PreparationType, PurchaseItemType, Unit
 from nutag.services.calculations import calculate_preparation_cost, calculate_unit_cost, to_decimal
+from nutag.services.inventory import get_available_purchase_batch
 
 
 @dataclass(frozen=True)
@@ -67,8 +68,30 @@ def create_preparation(
     if not ingredient_inputs:
         raise ValueError("Preparation must contain at least one ingredient use")
 
+    ingredient_unit_costs = []
+    reserved_purchase_quantities: dict[int, Decimal] = {}
+    for line in ingredient_inputs:
+        if line.purchase_item_id is None:
+            ingredient_unit_costs.append(to_decimal(line.unit_cost))
+            continue
+
+        reserved_purchase_quantities[line.purchase_item_id] = reserved_purchase_quantities.get(
+            line.purchase_item_id,
+            Decimal("0"),
+        ) + to_decimal(line.quantity)
+        batch = get_available_purchase_batch(
+            session,
+            purchase_item_id=line.purchase_item_id,
+            expected_item_type=PurchaseItemType.INGREDIENT,
+            expected_item_id=line.ingredient.id,
+            expected_unit_short_name=line.unit.short_name,
+            quantity=reserved_purchase_quantities[line.purchase_item_id],
+        )
+        ingredient_unit_costs.append(batch.unit_price)
+
     ingredient_total_costs = [
-        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=line.unit_cost) for line in ingredient_inputs
+        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=unit_cost)
+        for line, unit_cost in zip(ingredient_inputs, ingredient_unit_costs, strict=True)
     ]
     total_cost = calculate_preparation_cost(
         ingredient_costs=ingredient_total_costs,
@@ -91,14 +114,14 @@ def create_preparation(
         comment=comment,
     )
 
-    for line, line_total in zip(ingredient_inputs, ingredient_total_costs, strict=True):
+    for line, unit_cost, line_total in zip(ingredient_inputs, ingredient_unit_costs, ingredient_total_costs, strict=True):
         preparation.ingredient_uses.append(
             PreparationIngredientUse(
                 ingredient=line.ingredient,
                 unit=line.unit,
                 purchase_item_id=line.purchase_item_id,
                 quantity=to_decimal(line.quantity),
-                unit_cost=to_decimal(line.unit_cost),
+                unit_cost=unit_cost,
                 total_cost=line_total,
                 comment=line.comment,
             )

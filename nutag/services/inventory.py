@@ -24,7 +24,7 @@ from nutag.db.models import (
     PurchaseItem,
     PurchaseItemType,
 )
-from nutag.services.calculations import calculate_weighted_average_price
+from nutag.services.calculations import to_decimal
 
 
 from enum import StrEnum
@@ -65,6 +65,69 @@ class StockBatch:
     initial_quantity: Decimal
     current_quantity: Decimal
     unit_price: Decimal
+
+
+def get_available_purchase_batch(
+    session: Session,
+    *,
+    purchase_item_id: int,
+    expected_item_type: PurchaseItemType,
+    expected_item_id: int,
+    expected_unit_short_name: str,
+    quantity: Decimal | int | float | str,
+) -> StockBatch:
+    """Return a selected purchase batch and validate it can cover an outflow."""
+
+    quantity_decimal = to_decimal(quantity)
+    batch = next(
+        (
+            stock_batch
+            for stock_batch in list_available_stock_batches(session)
+            if stock_batch.batch_type == "purchase" and stock_batch.batch_id == purchase_item_id
+        ),
+        None,
+    )
+    if batch is None:
+        raise ValueError("Выбранная партия закупки недоступна или уже израсходована")
+    if batch.item_type != expected_item_type or batch.item_id != expected_item_id:
+        raise ValueError("Выбранная партия закупки не соответствует списываемой позиции")
+    if batch.unit_short_name != expected_unit_short_name:
+        raise ValueError("Единица измерения выбранной партии закупки не соответствует списанию")
+    if batch.current_quantity < quantity_decimal:
+        raise ValueError("Недостаточно остатка в выбранной партии закупки")
+
+    return batch
+
+
+def get_available_preparation_batch(
+    session: Session,
+    *,
+    source_preparation_id: int,
+    expected_preparation_name: str,
+    expected_unit_short_name: str,
+    quantity: Decimal | int | float | str,
+) -> StockBatch:
+    """Return a selected preparation batch and validate it can cover an outflow."""
+
+    quantity_decimal = to_decimal(quantity)
+    batch = next(
+        (
+            stock_batch
+            for stock_batch in list_available_stock_batches(session)
+            if stock_batch.batch_type == "preparation" and stock_batch.batch_id == source_preparation_id
+        ),
+        None,
+    )
+    if batch is None:
+        raise ValueError("Выбранная заготовка недоступна или уже израсходована")
+    if batch.item_type != ExtendedItemType.PREPARATION or batch.item_name != expected_preparation_name:
+        raise ValueError("Выбранная заготовка не соответствует списываемой позиции")
+    if batch.unit_short_name != expected_unit_short_name:
+        raise ValueError("Единица измерения выбранной заготовки не соответствует списанию")
+    if batch.current_quantity < quantity_decimal:
+        raise ValueError("Недостаточно остатка в выбранной заготовке")
+
+    return batch
 
 
 def list_available_stock_batches(session: Session) -> list[StockBatch]:
