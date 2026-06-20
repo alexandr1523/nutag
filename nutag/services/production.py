@@ -13,10 +13,8 @@ from sqlalchemy.orm import Session
 from nutag.db.models import (
     BatchIngredientUse,
     BatchPreparationUse,
-    BatchPackagingUse,
-    FinishedProductOutput,
+    FinishedProductBulkOutput,
     Ingredient,
-    Packaging,
     Preparation,
     Product,
     ProductionBatch,
@@ -52,31 +50,6 @@ class BatchPreparationInput:
     comment: str | None = None
 
 
-@dataclass(frozen=True)
-class BatchPackagingInput:
-    """Packaging consumed by a production batch."""
-
-    packaging: Packaging
-    unit: Unit
-    quantity: Decimal | int | float | str
-    unit_cost: Decimal | int | float | str
-    purchase_item_id: int | None = None
-    comment: str | None = None
-
-
-@dataclass(frozen=True)
-class FinishedProductOutputInput:
-    """Packaged finished product output from a batch."""
-
-    package_size: Decimal | int | float | str
-    package_unit: Unit
-    package_count: int
-    frozen_on: date | None = None
-    use_by: date | None = None
-    storage_place: str | None = None
-    comment: str | None = None
-
-
 def calculate_output_total(
     *,
     package_size: Decimal | int | float | str,
@@ -100,10 +73,8 @@ def create_production_batch(
     product: Product,
     actual_output_quantity: Decimal | int | float | str,
     output_unit: Unit,
-    outputs: Iterable[FinishedProductOutputInput],
     ingredient_uses: Iterable[BatchIngredientInput] = (),
     preparation_uses: Iterable[BatchPreparationInput] = (),
-    packaging_uses: Iterable[BatchPackagingInput] = (),
     planned_quantity: Decimal | int | float | str | None = None,
     labor_cost: Decimal | int | float | str = 0,
     equipment_depreciation: Decimal | int | float | str = 0,
@@ -111,19 +82,14 @@ def create_production_batch(
     status: str = "completed",
     comment: str | None = None,
 ) -> ProductionBatch:
-    """Create a production batch with cost and packaged output lines."""
+    """Create a production batch that creates unpacked finished product stock."""
 
     actual_output_decimal = to_decimal(actual_output_quantity)
     if actual_output_decimal <= 0:
         raise ValueError("Production batch actual output must be greater than zero")
 
-    output_inputs = list(outputs)
-    if not output_inputs:
-        raise ValueError("Production batch must contain at least one finished output line")
-
     ingredient_inputs = list(ingredient_uses)
     preparation_inputs = list(preparation_uses)
-    packaging_inputs = list(packaging_uses)
 
     ingredient_unit_costs = []
     reserved_purchase_quantities: dict[int, Decimal] = {}
@@ -166,26 +132,6 @@ def create_production_batch(
         )
         preparation_unit_costs.append(batch.unit_price)
 
-    packaging_unit_costs = []
-    for line in packaging_inputs:
-        if line.purchase_item_id is None:
-            packaging_unit_costs.append(to_decimal(line.unit_cost))
-            continue
-
-        reserved_purchase_quantities[line.purchase_item_id] = reserved_purchase_quantities.get(
-            line.purchase_item_id,
-            Decimal("0"),
-        ) + to_decimal(line.quantity)
-        batch = get_available_purchase_batch(
-            session,
-            purchase_item_id=line.purchase_item_id,
-            expected_item_type=PurchaseItemType.PACKAGING,
-            expected_item_id=line.packaging.id,
-            expected_unit_short_name=line.unit.short_name,
-            quantity=reserved_purchase_quantities[line.purchase_item_id],
-        )
-        packaging_unit_costs.append(batch.unit_price)
-
     ingredient_total_costs = [
         calculate_ingredient_use_total(quantity=line.quantity, unit_cost=unit_cost)
         for line, unit_cost in zip(ingredient_inputs, ingredient_unit_costs, strict=True)
@@ -194,11 +140,7 @@ def create_production_batch(
         calculate_ingredient_use_total(quantity=line.quantity, unit_cost=unit_cost)
         for line, unit_cost in zip(preparation_inputs, preparation_unit_costs, strict=True)
     ]
-    packaging_total_costs = [
-        calculate_ingredient_use_total(quantity=line.quantity, unit_cost=unit_cost)
-        for line, unit_cost in zip(packaging_inputs, packaging_unit_costs, strict=True)
-    ]
-    
+
     total_cost = calculate_batch_cost(
         raw_material_costs=ingredient_total_costs,
         preparation_costs=preparation_total_costs,
@@ -206,9 +148,7 @@ def create_production_batch(
         equipment_depreciation=equipment_depreciation,
         allocated_overhead=allocated_overhead,
     )
-    # Add packaging costs to total cost if needed, or if they are in raw_material_costs
-    total_cost += sum(packaging_total_costs, Decimal("0"))
-    
+
     unit_cost = calculate_unit_cost(total_cost=total_cost, actual_output=actual_output_decimal)
 
     batch = ProductionBatch(
@@ -257,36 +197,12 @@ def create_production_batch(
             )
         )
         
-    for line, unit_cost, line_total in zip(packaging_inputs, packaging_unit_costs, packaging_total_costs, strict=True):
-        batch.packaging_uses.append(
-            BatchPackagingUse(
-                packaging=line.packaging,
-                purchase_item_id=line.purchase_item_id,
-                unit=line.unit,
-                quantity=to_decimal(line.quantity),
-                unit_cost=unit_cost,
-                total_cost=line_total,
-                comment=line.comment,
-            )
+    batch.bulk_outputs.append(
+        FinishedProductBulkOutput(
+            quantity=actual_output_decimal,
+            unit=output_unit,
         )
-
-    for output in output_inputs:
-        total_quantity = calculate_output_total(
-            package_size=output.package_size,
-            package_count=output.package_count,
-        )
-        batch.outputs.append(
-            FinishedProductOutput(
-                package_size=to_decimal(output.package_size),
-                package_unit=output.package_unit,
-                package_count=output.package_count,
-                total_quantity=total_quantity,
-                frozen_on=output.frozen_on,
-                use_by=output.use_by,
-                storage_place=output.storage_place,
-                comment=output.comment,
-            )
-        )
+    )
 
     session.add(batch)
     session.flush()

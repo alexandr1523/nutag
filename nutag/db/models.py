@@ -300,6 +300,10 @@ class ProductionBatch(Base, TimestampMixin):
         back_populates="batch",
         cascade="all, delete-orphan",
     )
+    bulk_outputs: Mapped[list[FinishedProductBulkOutput]] = relationship(
+        back_populates="batch",
+        cascade="all, delete-orphan",
+    )
 
 
 class BatchIngredientUse(Base, TimestampMixin):
@@ -383,6 +387,58 @@ class FinishedProductOutput(Base, TimestampMixin):
 
     batch: Mapped[ProductionBatch] = relationship(back_populates="outputs")
     package_unit: Mapped[Unit] = relationship()
+    packing_operation: Mapped[FinishedProductPacking | None] = relationship(
+        back_populates="finished_output",
+        uselist=False,
+    )
+
+
+class FinishedProductBulkOutput(Base, TimestampMixin):
+    """Unpacked finished product stock from a production batch."""
+
+    __tablename__ = "finished_product_bulk_outputs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("production_batches.id"), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    frozen_on: Mapped[date | None] = mapped_column(Date)
+    use_by: Mapped[date | None] = mapped_column(Date)
+    storage_place: Mapped[str | None] = mapped_column(String(128))
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    batch: Mapped[ProductionBatch] = relationship(back_populates="bulk_outputs")
+    unit: Mapped[Unit] = relationship()
+    packings: Mapped[list[FinishedProductPacking]] = relationship(
+        back_populates="source_bulk_output",
+        cascade="all, delete-orphan",
+    )
+
+
+class FinishedProductPacking(Base, TimestampMixin):
+    """Packing operation that converts unpacked finished product into packaged stock."""
+
+    __tablename__ = "finished_product_packings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    packed_on: Mapped[date] = mapped_column(Date, nullable=False)
+    source_bulk_output_id: Mapped[int] = mapped_column(ForeignKey("finished_product_bulk_outputs.id"), nullable=False)
+    finished_output_id: Mapped[int] = mapped_column(ForeignKey("finished_product_outputs.id"), nullable=False)
+    packaging_id: Mapped[int] = mapped_column(ForeignKey("packaging.id"), nullable=False)
+    packaging_purchase_item_id: Mapped[int | None] = mapped_column(ForeignKey("purchase_items.id"))
+    packaging_unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    packaging_quantity: Mapped[Decimal] = mapped_column(Numeric(12, 3), nullable=False)
+    packaging_unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    packaging_total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    total_cost: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+
+    source_bulk_output: Mapped[FinishedProductBulkOutput] = relationship(back_populates="packings")
+    finished_output: Mapped[FinishedProductOutput] = relationship(back_populates="packing_operation")
+    packaging: Mapped[Packaging] = relationship()
+    packaging_purchase_item: Mapped[PurchaseItem | None] = relationship()
+    packaging_unit: Mapped[Unit] = relationship()
 
 
 class OrderStatus(StrEnum):

@@ -4,8 +4,9 @@ from decimal import Decimal
 from nutag.db import create_database, create_engine_for_url, create_session_factory
 from nutag.db.models import PurchaseItemType
 from nutag.services.inventory import list_available_stock_batches, list_inventory_balances
+from nutag.services.packing import pack_finished_product
 from nutag.services.purchases import PurchaseLineInput, create_purchase
-from nutag.services.production import BatchPackagingInput, FinishedProductOutputInput, create_production_batch
+from nutag.services.production import create_production_batch
 from nutag.services.references import create_ingredient, create_packaging, create_product, create_unit
 
 
@@ -92,7 +93,7 @@ def test_inventory_balances_are_empty_without_purchases() -> None:
         assert list_inventory_balances(session) == []
 
 
-def test_legacy_packaging_fifo_does_not_consume_ingredient_batches_with_same_id() -> None:
+def test_packing_does_not_consume_ingredient_batches_with_same_id() -> None:
     session_factory = make_session_factory()
 
     with session_factory() as session:
@@ -104,7 +105,7 @@ def test_legacy_packaging_fifo_does_not_consume_ingredient_batches_with_same_id(
 
         assert flour.id == container.id == 1
 
-        create_purchase(
+        purchase = create_purchase(
             session,
             purchase_date=date(2026, 6, 14),
             lines=[
@@ -127,21 +128,23 @@ def test_legacy_packaging_fifo_does_not_consume_ingredient_batches_with_same_id(
             ],
         )
 
-        create_production_batch(
+        batch = create_production_batch(
             session,
             produced_on=date(2026, 6, 15),
             product=product,
             actual_output_quantity="1",
             output_unit=kg,
-            packaging_uses=[
-                BatchPackagingInput(
-                    packaging=container,
-                    unit=piece,
-                    quantity="4",
-                    unit_cost="12",
-                )
-            ],
-            outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=1)],
+        )
+        pack_finished_product(
+            session,
+            packed_on=date(2026, 6, 15),
+            source_bulk_output_id=batch.bulk_outputs[0].id,
+            packaging=container,
+            packaging_unit=piece,
+            packaging_purchase_item_id=purchase.items[1].id,
+            package_size="0.25",
+            package_unit=kg,
+            package_count=4,
         )
         session.commit()
 

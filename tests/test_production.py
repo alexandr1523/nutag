@@ -5,12 +5,16 @@ import pytest
 
 from nutag.db import create_database, create_engine_for_url, create_session_factory
 from nutag.db.models import PurchaseItemType
+from nutag.services.inventory import (
+    list_available_bulk_finished_product_outputs,
+    list_available_finished_product_outputs,
+    list_available_stock_batches,
+)
+from nutag.services.packing import pack_finished_product
 from nutag.services.preparations import PreparationIngredientInput, create_preparation
 from nutag.services.production import (
     BatchIngredientInput,
-    BatchPackagingInput,
     BatchPreparationInput,
-    FinishedProductOutputInput,
     calculate_output_total,
     create_production_batch,
     list_production_batches,
@@ -41,7 +45,7 @@ def test_calculate_output_total_validates_package_size_and_count() -> None:
         calculate_output_total(package_size="0.5", package_count=0)
 
 
-def test_create_production_batch_calculates_costs_and_outputs() -> None:
+def test_create_production_batch_calculates_costs_and_bulk_output() -> None:
     session_factory = make_session_factory()
 
     with session_factory() as session:
@@ -78,10 +82,6 @@ def test_create_production_batch_calculates_costs_and_outputs() -> None:
             labor_cost="500",
             equipment_depreciation="40",
             allocated_overhead="60",
-            outputs=[
-                FinishedProductOutputInput(package_size="0.5", package_unit=kg, package_count=8),
-                FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=2),
-            ],
         )
         session.commit()
         batch_id = batch.id
@@ -95,7 +95,9 @@ def test_create_production_batch_calculates_costs_and_outputs() -> None:
         assert saved.ingredient_uses[0].total_cost == Decimal("184.00")
         assert len(saved.preparation_uses) == 1
         assert saved.preparation_uses[0].total_cost == Decimal("1350.00")
-        assert [output.total_quantity for output in saved.outputs] == [Decimal("4.000"), Decimal("2.000")]
+        assert saved.outputs == []
+        assert len(saved.bulk_outputs) == 1
+        assert saved.bulk_outputs[0].quantity == Decimal("6.000")
 
 
 def test_create_production_batch_rejects_zero_output_quantity() -> None:
@@ -111,25 +113,50 @@ def test_create_production_batch_rejects_zero_output_quantity() -> None:
                 product=product,
                 actual_output_quantity="0",
                 output_unit=kg,
-                outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=1)],
             )
 
 
-def test_create_production_batch_rejects_empty_outputs() -> None:
+def test_create_production_batch_allows_unpacked_output_without_packaged_lines() -> None:
     session_factory = make_session_factory()
 
     with session_factory() as session:
         kg = create_unit(session, name="kilogram", short_name="kg")
         product = create_product(session, name="Пельмени")
-        with pytest.raises(ValueError, match="finished output"):
-            create_production_batch(
-                session,
-                produced_on=date(2026, 6, 15),
-                product=product,
-                actual_output_quantity="1",
-                output_unit=kg,
-                outputs=[],
-            )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="1",
+            output_unit=kg,
+        )
+        session.commit()
+
+        assert batch.outputs == []
+        assert len(batch.bulk_outputs) == 1
+        assert batch.bulk_outputs[0].quantity == Decimal("1.000")
+
+
+def test_create_production_batch_creates_full_unpacked_output() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        product = create_product(session, name="Пельмени")
+        create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="5",
+            output_unit=kg,
+        )
+        session.commit()
+
+    with session_factory() as session:
+        bulk_outputs = list_available_bulk_finished_product_outputs(session)
+
+    assert len(bulk_outputs) == 1
+    assert bulk_outputs[0].product_name == "Пельмени"
+    assert bulk_outputs[0].current_quantity == Decimal("5.000")
 
 
 def test_create_production_batch_persists_selected_source_batch_ids() -> None:
@@ -137,11 +164,9 @@ def test_create_production_batch_persists_selected_source_batch_ids() -> None:
 
     with session_factory() as session:
         kg = create_unit(session, name="kilogram", short_name="kg")
-        piece = create_unit(session, name="piece", short_name="pcs")
         product = create_product(session, name="Пельмени")
         flour = create_ingredient(session, name="Мука", unit=kg)
         meat = create_ingredient(session, name="Фарш", unit=kg)
-        container = create_packaging(session, name="Контейнер", unit=piece)
         filling = create_preparation_type(session, name="Начинка")
 
         purchase = create_purchase(
@@ -155,19 +180,10 @@ def test_create_production_batch_persists_selected_source_batch_ids() -> None:
                     unit=kg,
                     quantity="10",
                     unit_price="92",
-                ),
-                PurchaseLineInput(
-                    item_type=PurchaseItemType.PACKAGING,
-                    item_name=container.name,
-                    packaging=container,
-                    unit=piece,
-                    quantity="20",
-                    unit_price="5",
-                ),
+                )
             ],
         )
         ingredient_purchase_item = purchase.items[0]
-        packaging_purchase_item = purchase.items[1]
         preparation = create_preparation(
             session,
             prepared_on=date(2026, 6, 14),
@@ -201,16 +217,6 @@ def test_create_production_batch_persists_selected_source_batch_ids() -> None:
                     source_preparation_id=preparation.id,
                 )
             ],
-            packaging_uses=[
-                BatchPackagingInput(
-                    packaging=container,
-                    unit=piece,
-                    quantity="6",
-                    unit_cost="5",
-                    purchase_item_id=packaging_purchase_item.id,
-                )
-            ],
-            outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=6)],
         )
         session.commit()
         batch_id = batch.id
@@ -220,7 +226,8 @@ def test_create_production_batch_persists_selected_source_batch_ids() -> None:
         assert saved.id == batch_id
         assert saved.ingredient_uses[0].purchase_item_id == ingredient_purchase_item.id
         assert saved.preparation_uses[0].source_preparation_id == preparation.id
-        assert saved.packaging_uses[0].purchase_item_id == packaging_purchase_item.id
+        assert saved.packaging_uses == []
+        assert saved.bulk_outputs[0].quantity == Decimal("6.000")
 
 
 def test_create_production_batch_uses_selected_source_prices() -> None:
@@ -228,11 +235,9 @@ def test_create_production_batch_uses_selected_source_prices() -> None:
 
     with session_factory() as session:
         kg = create_unit(session, name="kilogram", short_name="kg")
-        piece = create_unit(session, name="piece", short_name="pcs")
         product = create_product(session, name="Пельмени")
         flour = create_ingredient(session, name="Мука", unit=kg)
         meat = create_ingredient(session, name="Фарш", unit=kg)
-        container = create_packaging(session, name="Контейнер", unit=piece)
         filling = create_preparation_type(session, name="Начинка")
 
         purchase = create_purchase(
@@ -246,15 +251,7 @@ def test_create_production_batch_uses_selected_source_prices() -> None:
                     unit=kg,
                     quantity="10",
                     unit_price="80",
-                ),
-                PurchaseLineInput(
-                    item_type=PurchaseItemType.PACKAGING,
-                    packaging=container,
-                    item_name=container.name,
-                    unit=piece,
-                    quantity="10",
-                    unit_price="5",
-                ),
+                )
             ],
         )
         preparation = create_preparation(
@@ -290,16 +287,6 @@ def test_create_production_batch_uses_selected_source_prices() -> None:
                     source_preparation_id=preparation.id,
                 )
             ],
-            packaging_uses=[
-                BatchPackagingInput(
-                    packaging=container,
-                    unit=piece,
-                    quantity="2",
-                    unit_cost="999",
-                    purchase_item_id=purchase.items[1].id,
-                )
-            ],
-            outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=1)],
         )
         session.commit()
 
@@ -307,9 +294,8 @@ def test_create_production_batch_uses_selected_source_prices() -> None:
         assert batch.ingredient_uses[0].total_cost == Decimal("160.00")
         assert batch.preparation_uses[0].unit_cost == Decimal("100.0000")
         assert batch.preparation_uses[0].total_cost == Decimal("200.00")
-        assert batch.packaging_uses[0].unit_cost == Decimal("5.0000")
-        assert batch.packaging_uses[0].total_cost == Decimal("10.00")
-        assert batch.total_cost == Decimal("370.00")
+        assert batch.packaging_uses == []
+        assert batch.total_cost == Decimal("360.00")
 
 
 def test_create_production_batch_rejects_selected_preparation_overdraft() -> None:
@@ -345,5 +331,110 @@ def test_create_production_batch_rejects_selected_preparation_overdraft() -> Non
                         source_preparation_id=preparation.id,
                     )
                 ],
-                outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=1)],
+            )
+
+
+def test_pack_finished_product_consumes_unpacked_output_and_packaging() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        piece = create_unit(session, name="piece", short_name="pcs")
+        product = create_product(session, name="Пельмени")
+        container = create_packaging(session, name="Контейнер", unit=piece)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.PACKAGING,
+                    packaging=container,
+                    item_name=container.name,
+                    unit=piece,
+                    quantity="10",
+                    unit_price="5",
+                )
+            ],
+        )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="3",
+            output_unit=kg,
+            labor_cost="300",
+        )
+
+        packing = pack_finished_product(
+            session,
+            packed_on=date(2026, 6, 16),
+            source_bulk_output_id=batch.bulk_outputs[0].id,
+            packaging=container,
+            packaging_unit=piece,
+            packaging_purchase_item_id=purchase.items[0].id,
+            package_size="0.5",
+            package_unit=kg,
+            package_count=4,
+        )
+        session.commit()
+
+        assert packing.source_bulk_output_id == batch.bulk_outputs[0].id
+        assert packing.finished_output.total_quantity == Decimal("2.0")
+        assert packing.packaging_quantity == Decimal("4")
+        assert packing.packaging_unit_cost == Decimal("5.0000")
+        assert packing.packaging_total_cost == Decimal("20.00")
+        assert packing.unit_cost == Decimal("110.0000")
+
+    with session_factory() as session:
+        bulk_outputs = list_available_bulk_finished_product_outputs(session)
+        finished_outputs = list_available_finished_product_outputs(session)
+        stock_batches = list_available_stock_batches(session)
+
+    assert bulk_outputs[0].current_quantity == Decimal("1.000")
+    assert finished_outputs[0].current_quantity == Decimal("2.000")
+    assert finished_outputs[0].unit_cost == Decimal("110.0000")
+    assert stock_batches[0].current_quantity == Decimal("6.000")
+
+
+def test_pack_finished_product_rejects_unpacked_overdraft() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        piece = create_unit(session, name="piece", short_name="pcs")
+        product = create_product(session, name="Пельмени")
+        container = create_packaging(session, name="Контейнер", unit=piece)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.PACKAGING,
+                    packaging=container,
+                    item_name=container.name,
+                    unit=piece,
+                    quantity="10",
+                    unit_price="5",
+                )
+            ],
+        )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="1",
+            output_unit=kg,
+        )
+
+        with pytest.raises(ValueError, match="Недостаточно нефасованного остатка"):
+            pack_finished_product(
+                session,
+                packed_on=date(2026, 6, 16),
+                source_bulk_output_id=batch.bulk_outputs[0].id,
+                packaging=container,
+                packaging_unit=piece,
+                packaging_purchase_item_id=purchase.items[0].id,
+                package_size="0.5",
+                package_unit=kg,
+                package_count=3,
             )

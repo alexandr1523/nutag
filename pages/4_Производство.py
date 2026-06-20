@@ -8,15 +8,13 @@ from decimal import Decimal
 import streamlit as st
 
 from nutag.db.init_db import initialize_database
-from nutag.db.models import Equipment, Ingredient, LaborRate, Packaging, Preparation, Product, PurchaseItemType, Unit
+from nutag.db.models import Equipment, Ingredient, LaborRate, Preparation, Product, PurchaseItemType, Unit
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.inventory import ExtendedItemType, list_available_stock_batches
 from nutag.services.preparations import list_preparations
 from nutag.services.production import (
     BatchIngredientInput,
-    BatchPackagingInput,
     BatchPreparationInput,
-    FinishedProductOutputInput,
     create_production_batch,
     list_production_batches,
 )
@@ -58,18 +56,18 @@ with tabs[0]:
                         st.write(f"**Себестоимость (общая):** {b.total_cost:,.2f}")
                         st.write(f"**Себестоимость (ед):** {b.unit_cost:,.4f}")
 
-                    st.subheader("Фасовка")
-                    out_data = []
-                    for out in b.outputs:
-                        out_data.append(
+                    st.subheader("Нефасованный выпуск")
+                    bulk_data = []
+                    for out in b.bulk_outputs:
+                        bulk_data.append(
                             {
-                                "Размер": out.package_size,
-                                "Ед.изм.": out.package_unit.short_name,
-                                "Кол-во упак.": out.package_count,
-                                "Итого вес": out.total_quantity,
+                                "Количество": out.quantity,
+                                "Ед.изм.": out.unit.short_name,
+                                "Место хранения": out.storage_place or "",
+                                "Годен до": out.use_by or "",
                             }
                         )
-                    st.table(out_data)
+                    st.table(bulk_data)
 
                     st.subheader("Затраты")
                     uses_data = []
@@ -91,18 +89,6 @@ with tabs[0]:
                             {
                                 "Тип": "Заготовка",
                                 "Наименование": use.preparation.name + source_info,
-                                "Кол-во": use.quantity,
-                                "Ед": use.unit.short_name,
-                                "Цена": use.unit_cost,
-                                "Итого": use.total_cost,
-                            }
-                        )
-                    for use in b.packaging_uses:
-                        source_info = f" (Партия #{use.purchase_item_id})" if use.purchase_item_id else ""
-                        uses_data.append(
-                            {
-                                "Тип": "Упаковка",
-                                "Наименование": use.packaging.name + source_info,
                                 "Кол-во": use.quantity,
                                 "Ед": use.unit.short_name,
                                 "Цена": use.unit_cost,
@@ -131,14 +117,7 @@ with tabs[1]:
             for b in available_batches
             if b.item_type == ExtendedItemType.PREPARATION
         }
-        pkg_batch_options = {
-            build_batch_option_label(b): b
-            for b in available_batches
-            if b.item_type == PurchaseItemType.PACKAGING
-        }
-
         all_ingredients = {i.id: i for i in db.query(Ingredient).all()}
-        all_packaging = {p.id: p for p in db.query(Packaging).all()}
         all_products = {p.name: p for p in db.query(Product).all()}
         all_units = {u.short_name: u for u in db.query(Unit).all()}
         all_equipment = {e.name: e for e in db.query(Equipment).all()}
@@ -268,67 +247,10 @@ with tabs[1]:
                                 )
                             )
 
-                st.subheader("Упаковка (до 2)")
-                pkg_uses = []
-                for i in range(2):
-                    ca, cb, cc, cd = st.columns([4, 1, 2, 2])
-                    with ca:
-                        pk_batch_label = st.selectbox(
-                            f"Выбор партии упаковки {i}",
-                            options=[""] + list(pkg_batch_options.keys()),
-                            key=f"bpk_batch_{i}",
-                        )
-
-                    selected_pk_batch = pkg_batch_options.get(pk_batch_label)
-                    def_unit = selected_pk_batch.unit_short_name if selected_pk_batch else ""
-                    def_price = float(selected_pk_batch.unit_price) if selected_pk_batch else 0.0
-
-                    with cb:
-                        st.caption("Ед. авто")
-                        st.write(def_unit or "—")
-                    with cc:
-                        qty = st.number_input(f"Кол-во уп {i}", min_value=0.0, step=1.0, format="%.0f", key=f"bpk_qty_{i}")
-                    with cd:
-                        st.write("Цена:")
-                        st.info(f"{def_price:,.2f}")
-
-                    if selected_pk_batch and qty > 0 and def_unit in all_units:
-                        pkg_uses.append(
-                            BatchPackagingInput(
-                                packaging=all_packaging[selected_pk_batch.item_id],
-                                unit=all_units[def_unit],
-                                quantity=Decimal(str(qty)),
-                                unit_cost=Decimal(str(def_price)),
-                                purchase_item_id=selected_pk_batch.batch_id,
-                            )
-                        )
-
-                st.subheader("Фасовка ГП (до 2)")
-                out_inputs = []
-                for i in range(2):
-                    ca, cb, cc = st.columns([2, 2, 2])
-                    with ca:
-                        p_size = st.number_input(f"Размер упак {i}", min_value=0.0, step=0.1, format="%.3f", key=f"bo_size_{i}")
-                    with cb:
-                        p_unit = st.selectbox(f"Ед упак {i}", options=list(all_units.keys()), key=f"bo_unit_{i}")
-                    with cc:
-                        p_count = st.number_input(f"Кол-во упак {i}", min_value=0, step=1, key=f"bo_count_{i}")
-
-                    if p_size > 0 and p_count > 0:
-                        out_inputs.append(
-                            FinishedProductOutputInput(
-                                package_size=Decimal(str(p_size)),
-                                package_unit=all_units[p_unit],
-                                package_count=p_count,
-                            )
-                        )
-
                 submitted = st.button("Сохранить партию", type="primary")
                 if submitted:
                     if actual_qty <= 0:
                         st.error("Фактический выход должен быть больше 0")
-                    elif not out_inputs:
-                        st.error("Добавьте хотя бы одну строку фасовки")
                     elif not (ing_uses or p_uses):
                         st.error("Добавьте хотя бы один ингредиент или заготовку")
                     else:
@@ -356,35 +278,14 @@ with tabs[1]:
                                     )
                                     for u in p_uses
                                 ]
-                                db_pkg_uses = [
-                                    BatchPackagingInput(
-                                        packaging=db_write.merge(u.packaging),
-                                        unit=db_write.merge(u.unit),
-                                        quantity=u.quantity,
-                                        unit_cost=u.unit_cost,
-                                        purchase_item_id=u.purchase_item_id,
-                                    )
-                                    for u in pkg_uses
-                                ]
-                                db_outputs = [
-                                    FinishedProductOutputInput(
-                                        package_size=u.package_size,
-                                        package_unit=db_write.merge(u.package_unit),
-                                        package_count=u.package_count,
-                                    )
-                                    for u in out_inputs
-                                ]
-
                                 create_production_batch(
                                     db_write,
                                     produced_on=batch_date,
                                     product=db_prod,
                                     actual_output_quantity=Decimal(str(actual_qty)),
                                     output_unit=db_unit,
-                                    outputs=db_outputs,
                                     ingredient_uses=db_ing_uses,
                                     preparation_uses=db_p_uses,
-                                    packaging_uses=db_pkg_uses,
                                     labor_cost=calc_labor_cost,
                                     equipment_depreciation=calc_depr,
                                     allocated_overhead=Decimal(str(overhead)),

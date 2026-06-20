@@ -14,7 +14,7 @@ from nutag.services.preparations import (
     list_preparations,
     update_preparation,
 )
-from nutag.services.production import BatchPreparationInput, FinishedProductOutputInput, create_production_batch
+from nutag.services.production import BatchPreparationInput, create_production_batch
 from nutag.services.purchases import PurchaseLineInput, create_purchase
 from nutag.services.references import create_ingredient, create_packaging, create_preparation_type, create_product, create_unit
 from nutag.services.inventory import list_available_stock_batches
@@ -325,7 +325,6 @@ def test_update_preparation_rejects_used_preparation() -> None:
                     source_preparation_id=preparation.id,
                 )
             ],
-            outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=2)],
         )
 
         assert is_preparation_used(session, preparation.id)
@@ -432,7 +431,6 @@ def test_delete_preparation_rejects_used_preparation() -> None:
                     source_preparation_id=preparation.id,
                 )
             ],
-            outputs=[FinishedProductOutputInput(package_size="1", package_unit=kg, package_count=2)],
         )
 
         with pytest.raises(ValueError, match="использована в производстве"):

@@ -84,6 +84,21 @@ class FinishedProductStock:
     output: object
 
 
+@dataclass(frozen=True)
+class BulkFinishedProductStock:
+    """Available unpacked finished product stock from a production batch."""
+
+    bulk_output_id: int
+    product_id: int
+    product_name: str
+    produced_on: date
+    unit_short_name: str
+    initial_quantity: Decimal
+    current_quantity: Decimal
+    unit_cost: Decimal
+    output: object
+
+
 def get_available_purchase_batch(
     session: Session,
     *,
@@ -147,6 +162,37 @@ def get_available_preparation_batch(
     return batch
 
 
+def get_available_bulk_finished_product_output(
+    session: Session,
+    *,
+    bulk_output_id: int,
+    expected_unit_short_name: str,
+    quantity: Decimal | int | float | str,
+    expected_product_id: int | None = None,
+) -> BulkFinishedProductStock:
+    """Return a selected unpacked finished product output and validate availability."""
+
+    quantity_decimal = to_decimal(quantity)
+    batch = next(
+        (
+            stock
+            for stock in list_available_bulk_finished_product_outputs(session)
+            if stock.bulk_output_id == bulk_output_id
+        ),
+        None,
+    )
+    if batch is None:
+        raise ValueError("Выбранный нефасованный остаток готовой продукции недоступен или уже израсходован")
+    if expected_product_id is not None and batch.product_id != expected_product_id:
+        raise ValueError("Выбранный нефасованный остаток не соответствует продукту")
+    if batch.unit_short_name != expected_unit_short_name:
+        raise ValueError("Единица измерения нефасованного остатка не соответствует фасовке")
+    if batch.current_quantity < quantity_decimal:
+        raise ValueError("Недостаточно нефасованного остатка готовой продукции")
+
+    return batch
+
+
 def get_available_finished_product_output(
     session: Session,
     *,
@@ -204,6 +250,7 @@ def list_available_finished_product_outputs(session: Session) -> list[FinishedPr
         current_quantity = output.total_quantity - used_quantity
         if current_quantity <= 0:
             continue
+        unit_cost = output.packing_operation.unit_cost if output.packing_operation else output.batch.unit_cost
 
         stocks.append(
             FinishedProductStock(
@@ -216,12 +263,49 @@ def list_available_finished_product_outputs(session: Session) -> list[FinishedPr
                 total_quantity=output.total_quantity,
                 current_quantity=current_quantity,
                 current_package_count=current_quantity / output.package_size,
-                unit_cost=output.batch.unit_cost,
+                unit_cost=unit_cost,
                 output=output,
             )
         )
 
     return sorted(stocks, key=lambda stock: (stock.product_name, stock.produced_on, stock.output_id))
+
+
+def list_available_bulk_finished_product_outputs(session: Session) -> list[BulkFinishedProductStock]:
+    """List unpacked finished product outputs with positive remaining quantity."""
+
+    from nutag.db.models import FinishedProductBulkOutput, FinishedProductPacking
+
+    used_by_output_id: dict[int, Decimal] = {}
+    for packing in session.query(FinishedProductPacking).all():
+        used_by_output_id[packing.source_bulk_output_id] = (
+            used_by_output_id.get(packing.source_bulk_output_id, Decimal("0"))
+            + packing.finished_output.total_quantity
+        )
+
+    stocks: list[BulkFinishedProductStock] = []
+    outputs = session.query(FinishedProductBulkOutput).order_by(FinishedProductBulkOutput.id).all()
+    for output in outputs:
+        used_quantity = used_by_output_id.get(output.id, Decimal("0"))
+        current_quantity = output.quantity - used_quantity
+        if current_quantity <= 0:
+            continue
+
+        stocks.append(
+            BulkFinishedProductStock(
+                bulk_output_id=output.id,
+                product_id=output.batch.product_id,
+                product_name=output.batch.product.name,
+                produced_on=output.batch.produced_on,
+                unit_short_name=output.unit.short_name,
+                initial_quantity=output.quantity,
+                current_quantity=current_quantity,
+                unit_cost=output.batch.unit_cost,
+                output=output,
+            )
+        )
+
+    return sorted(stocks, key=lambda stock: (stock.product_name, stock.produced_on, stock.bulk_output_id))
 
 
 def list_available_stock_batches(session: Session) -> list[StockBatch]:
@@ -236,7 +320,8 @@ def list_available_stock_batches(session: Session) -> list[StockBatch]:
         PreparationIngredientUse,
         BatchIngredientUse,
         BatchPreparationUse,
-        BatchPackagingUse
+        BatchPackagingUse,
+        FinishedProductPacking,
     )
     from sqlalchemy import func
 
@@ -291,6 +376,19 @@ def list_available_stock_batches(session: Session) -> list[StockBatch]:
                 if b["id"] == pi_id:
                     b["remaining"] -= Decimal(str(qty))
                     break
+
+    linked_packings = session.query(
+        FinishedProductPacking.packaging_purchase_item_id,
+        func.sum(FinishedProductPacking.packaging_quantity),
+    )\
+        .filter(FinishedProductPacking.packaging_purchase_item_id.isnot(None))\
+        .group_by(FinishedProductPacking.packaging_purchase_item_id)\
+        .all()
+    for pi_id, qty in linked_packings:
+        for b in pi_batches:
+            if b["id"] == pi_id:
+                b["remaining"] -= Decimal(str(qty))
+                break
 
     # Linked Preparations
     linked_preps = session.query(BatchPreparationUse.source_preparation_id, func.sum(BatchPreparationUse.quantity))\
@@ -371,6 +469,8 @@ def list_inventory_balances(session: Session) -> list[InventoryBalance]:
     from nutag.db.models import (
         Order,
         OrderItem,
+        FinishedProductBulkOutput,
+        FinishedProductPacking,
         Preparation,
         ProductionBatch,
         FinishedProductOutput,
@@ -433,7 +533,43 @@ def list_inventory_balances(session: Session) -> list[InventoryBalance]:
         # Finished product output (inflow)
         for out in b.outputs:
             # We track products by Product ID and Name
-            add_inflow(ExtendedItemType.PRODUCT, b.product_id, b.product.name, out.package_unit.short_name, out.total_quantity, out.total_quantity * b.unit_cost)
+            unit_cost = out.packing_operation.unit_cost if out.packing_operation else b.unit_cost
+            add_inflow(
+                ExtendedItemType.PRODUCT,
+                b.product_id,
+                b.product.name,
+                out.package_unit.short_name,
+                out.total_quantity,
+                out.total_quantity * unit_cost,
+            )
+
+    bulk_outputs = session.scalars(select(FinishedProductBulkOutput)).all()
+    for output in bulk_outputs:
+        add_inflow(
+            ExtendedItemType.PRODUCT,
+            output.batch.product_id,
+            output.batch.product.name,
+            output.unit.short_name,
+            output.quantity,
+            output.quantity * output.batch.unit_cost,
+        )
+
+    packings = session.scalars(select(FinishedProductPacking)).all()
+    for packing in packings:
+        add_outflow(
+            ExtendedItemType.PRODUCT,
+            packing.source_bulk_output.batch.product_id,
+            packing.source_bulk_output.batch.product.name,
+            packing.source_bulk_output.unit.short_name,
+            packing.finished_output.total_quantity,
+        )
+        add_outflow(
+            PurchaseItemType.PACKAGING,
+            packing.packaging_id,
+            packing.packaging.name,
+            packing.packaging_unit.short_name,
+            packing.packaging_quantity,
+        )
 
     # 4. Order outflows (Finished products)
     orders = session.scalars(select(Order)).all()

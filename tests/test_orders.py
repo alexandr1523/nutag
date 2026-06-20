@@ -10,16 +10,59 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from nutag.db import create_database, create_engine_for_url, create_session_factory
-from nutag.db.models import Order, OrderStatus, PaymentStatus, Product, ReservationStatus, Unit
+from nutag.db.models import Order, OrderStatus, PaymentStatus, Product, PurchaseItemType, ReservationStatus, Unit
 from nutag.services.inventory import list_available_finished_product_outputs
 from nutag.services.orders import OrderItemInput, create_order, list_orders
-from nutag.services.production import FinishedProductOutputInput, create_production_batch
+from nutag.services.packing import pack_finished_product
+from nutag.services.production import create_production_batch
+from nutag.services.purchases import PurchaseLineInput, create_purchase
+from nutag.services.references import create_packaging
 
 
 def make_session_factory():
     engine = create_engine_for_url("sqlite:///:memory:")
     create_database(engine)
     return create_session_factory(engine)
+
+
+def create_packed_output(session: Session, *, product: Product, unit_kg: Unit, quantity: str = "2"):
+    piece = Unit(name=f"Piece {product.id}", short_name=f"pcs{product.id}")
+    session.add(piece)
+    session.flush()
+    packaging = create_packaging(session, name=f"Контейнер {product.id}", unit=piece)
+    purchase = create_purchase(
+        session,
+        purchase_date=date(2026, 6, 13),
+        lines=[
+            PurchaseLineInput(
+                item_type=PurchaseItemType.PACKAGING,
+                packaging=packaging,
+                item_name=packaging.name,
+                unit=piece,
+                quantity="20",
+                unit_price="5",
+            )
+        ],
+    )
+    batch = create_production_batch(
+        session,
+        produced_on=date(2026, 6, 14),
+        product=product,
+        actual_output_quantity=quantity,
+        output_unit=unit_kg,
+    )
+    packing = pack_finished_product(
+        session,
+        packed_on=date(2026, 6, 14),
+        source_bulk_output_id=batch.bulk_outputs[0].id,
+        packaging=packaging,
+        packaging_unit=piece,
+        packaging_purchase_item_id=purchase.items[0].id,
+        package_size="0.5",
+        package_unit=unit_kg,
+        package_count=int(Decimal(quantity) / Decimal("0.5")),
+    )
+    return packing.finished_output
 
 
 def test_create_order():
@@ -103,15 +146,7 @@ def test_create_order_persists_selected_finished_output() -> None:
         product = Product(name="Пельмени")
         session.add(product)
         session.flush()
-        batch = create_production_batch(
-            session,
-            produced_on=date(2026, 6, 14),
-            product=product,
-            actual_output_quantity="2",
-            output_unit=unit_kg,
-            outputs=[FinishedProductOutputInput(package_size="0.5", package_unit=unit_kg, package_count=4)],
-        )
-        output = batch.outputs[0]
+        output = create_packed_output(session, product=product, unit_kg=unit_kg, quantity="2")
 
         order = create_order(
             session,
@@ -151,15 +186,7 @@ def test_create_order_rejects_selected_finished_output_overdraft() -> None:
         product = Product(name="Пельмени")
         session.add(product)
         session.flush()
-        batch = create_production_batch(
-            session,
-            produced_on=date(2026, 6, 14),
-            product=product,
-            actual_output_quantity="1",
-            output_unit=unit_kg,
-            outputs=[FinishedProductOutputInput(package_size="0.5", package_unit=unit_kg, package_count=2)],
-        )
-        output = batch.outputs[0]
+        output = create_packed_output(session, product=product, unit_kg=unit_kg, quantity="1")
 
         create_order(
             session,
@@ -205,14 +232,7 @@ def test_create_order_rejects_selected_finished_output_wrong_product() -> None:
         other_product = Product(name="Вареники")
         session.add_all([product, other_product])
         session.flush()
-        batch = create_production_batch(
-            session,
-            produced_on=date(2026, 6, 14),
-            product=product,
-            actual_output_quantity="1",
-            output_unit=unit_kg,
-            outputs=[FinishedProductOutputInput(package_size="0.5", package_unit=unit_kg, package_count=2)],
-        )
+        output = create_packed_output(session, product=product, unit_kg=unit_kg, quantity="1")
 
         with pytest.raises(ValueError, match="не соответствует продукту"):
             create_order(
@@ -226,7 +246,7 @@ def test_create_order_rejects_selected_finished_output_wrong_product() -> None:
                         package_unit=unit_kg,
                         package_count=1,
                         unit_price="450",
-                        batch_output=batch.outputs[0],
+                        batch_output=output,
                     )
                 ],
             )
@@ -241,15 +261,7 @@ def test_create_order_rejects_cumulative_selected_finished_output_overdraft() ->
         product = Product(name="Пельмени")
         session.add(product)
         session.flush()
-        batch = create_production_batch(
-            session,
-            produced_on=date(2026, 6, 14),
-            product=product,
-            actual_output_quantity="1",
-            output_unit=unit_kg,
-            outputs=[FinishedProductOutputInput(package_size="0.5", package_unit=unit_kg, package_count=2)],
-        )
-        output = batch.outputs[0]
+        output = create_packed_output(session, product=product, unit_kg=unit_kg, quantity="1")
 
         with pytest.raises(ValueError, match="Недостаточно остатка"):
             create_order(
