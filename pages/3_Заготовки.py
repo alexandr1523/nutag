@@ -125,6 +125,10 @@ with tabs[0]:
                                     key=lambda batch: (batch.item_name, batch.date, batch.batch_id),
                                 )
                             }
+                            edit_ingredient_options = {
+                                ingredient.name: ingredient
+                                for ingredient in sorted(all_ingredients.values(), key=lambda ingredient: ingredient.name)
+                            }
                             edit_preparation_type_options = {
                                 preparation_type.name: preparation_type for preparation_type in preparation_types
                             }
@@ -203,27 +207,48 @@ with tabs[0]:
                             for idx in range(row_count):
                                 existing_use = edit_rows[idx] if idx < len(edit_rows) else None
                                 st.markdown(f"**Ингредиент {idx + 1}**")
-                                ea, eb, ec, ed, ee, ef = st.columns([4, 1, 2, 2, 2, 2.5])
-                                batch_labels = [""] + list(edit_batch_options.keys())
+                                ea, eb, ec, ed, ee, ef, eg = st.columns([2.5, 4, 1, 2, 2, 2, 2.5])
+                                ingredient_names = [""] + list(edit_ingredient_options.keys())
+                                current_ingredient_name = existing_use.ingredient.name if existing_use else ""
+                                with ea:
+                                    edit_ingredient_name = st.selectbox(
+                                        f"Ингредиент {idx + 1}",
+                                        options=ingredient_names,
+                                        index=ingredient_names.index(current_ingredient_name)
+                                        if current_ingredient_name in ingredient_names
+                                        else 0,
+                                        key=edit_key("ingredient", idx),
+                                    )
+                                edit_selected_ingredient_filter = edit_ingredient_options.get(edit_ingredient_name)
+                                filtered_edit_batch_options = {
+                                    label: batch
+                                    for label, batch in edit_batch_options.items()
+                                    if edit_selected_ingredient_filter is not None
+                                    and batch.item_id == edit_selected_ingredient_filter.id
+                                }
+                                batch_labels = [""] + list(filtered_edit_batch_options.keys())
                                 current_label = ""
                                 if existing_use and existing_use.purchase_item_id is not None:
                                     current_label = next(
                                         (
                                             label
-                                            for label, batch in edit_batch_options.items()
+                                            for label, batch in filtered_edit_batch_options.items()
                                             if batch.batch_id == existing_use.purchase_item_id
                                         ),
                                         "",
                                     )
-                                with ea:
+                                with eb:
                                     edit_batch_label = st.selectbox(
                                         f"Выбор партии {idx + 1}",
                                         options=batch_labels,
                                         index=batch_labels.index(current_label) if current_label in batch_labels else 0,
-                                        key=edit_key("batch", idx),
+                                        key=(
+                                            f"{edit_key('batch', idx)}_"
+                                            f"{edit_selected_ingredient_filter.id if edit_selected_ingredient_filter else 'none'}"
+                                        ),
                                     )
 
-                                edit_selected_batch = edit_batch_options.get(edit_batch_label)
+                                edit_selected_batch = filtered_edit_batch_options.get(edit_batch_label)
                                 edit_selected_ingredient = (
                                     all_ingredients.get(edit_selected_batch.item_id) if edit_selected_batch else None
                                 )
@@ -235,10 +260,10 @@ with tabs[0]:
                                 edit_qty_default = float(existing_use.quantity) if existing_use else 0.0
                                 edit_waste_default = float(existing_use.waste_quantity) if existing_use else 0.0
 
-                                with eb:
+                                with ec:
                                     st.caption("Ед. авто")
                                     st.write(edit_ingredient_unit or "—")
-                                with ec:
+                                with ed:
                                     edit_qty = st.number_input(
                                         f"Кол-во {idx + 1}",
                                         min_value=0.0,
@@ -247,7 +272,7 @@ with tabs[0]:
                                         value=edit_qty_default,
                                         key=edit_key("qty", idx),
                                     )
-                                with ed:
+                                with ee:
                                     edit_waste_qty = st.number_input(
                                         f"Отходы {idx + 1}",
                                         min_value=0.0,
@@ -256,12 +281,12 @@ with tabs[0]:
                                         value=edit_waste_default,
                                         key=edit_key("waste", idx),
                                     )
-                                with ee:
+                                with ef:
                                     edit_qty_decimal = Decimal(str(edit_qty))
                                     edit_waste_decimal = Decimal(str(edit_waste_qty))
                                     edit_useful_qty = edit_qty_decimal - edit_waste_decimal
                                     st.metric(f"Полезно {idx + 1}", f"{edit_useful_qty:,.3f}")
-                                with ef:
+                                with eg:
                                     edit_line_total = edit_qty_decimal * Decimal(str(edit_default_price))
                                     st.metric(f"Стоимость списания {idx + 1}", f"{edit_line_total:,.2f}")
                                     if edit_useful_qty > 0 and edit_ingredient_unit:
@@ -270,6 +295,15 @@ with tabs[0]:
                                             f"{edit_ingredient_unit}"
                                         )
 
+                                if (
+                                    edit_selected_ingredient_filter is not None
+                                    and not filtered_edit_batch_options
+                                    and (edit_qty_decimal > 0 or edit_waste_decimal > 0)
+                                ):
+                                    edit_validation_errors.append(
+                                        f"Строка {idx + 1}: по выбранному ингредиенту нет доступных партий."
+                                    )
+                                    continue
                                 if edit_selected_batch is None and (edit_qty_decimal > 0 or edit_waste_decimal > 0):
                                     edit_validation_errors.append(
                                         f"Строка {idx + 1}: выберите партию ингредиента или очистите количество и отходы."
@@ -426,6 +460,9 @@ with tabs[1]:
         }
         preparation_type_options = {preparation_type.name: preparation_type for preparation_type in preparation_types}
         all_ingredients = {ingredient.id: ingredient for ingredient in db.query(Ingredient).all()}
+        ingredient_options = {
+            ingredient.name: ingredient for ingredient in sorted(all_ingredients.values(), key=lambda ingredient: ingredient.name)
+        }
         all_units = {unit.short_name: unit for unit in db.query(Unit).all()}
 
         if not preparation_type_options:
@@ -518,25 +555,40 @@ with tabs[1]:
             batches_by_id = {}
             for i in range(5):
                 st.markdown(f"**Ингредиент {i + 1}**")
-                ca, cb, cc, cd, ce, cf = st.columns([4, 1, 2, 2, 2, 2.5])
+                ca, cb, cc, cd, ce, cf, cg = st.columns([2.5, 4, 1, 2, 2, 2, 2.5])
                 with ca:
+                    ingredient_name = st.selectbox(
+                        f"Ингредиент {i + 1}",
+                        options=[""] + list(ingredient_options.keys()),
+                        key=field_key("ingredient", i),
+                    )
+                selected_ingredient_filter = ingredient_options.get(ingredient_name)
+                filtered_batch_options = {
+                    label: batch
+                    for label, batch in batch_options.items()
+                    if selected_ingredient_filter is not None and batch.item_id == selected_ingredient_filter.id
+                }
+                with cb:
                     batch_label = st.selectbox(
                         f"Выбор партии {i + 1}",
-                        options=[""] + list(batch_options.keys()),
-                        key=field_key("batch_label", i),
+                        options=[""] + list(filtered_batch_options.keys()),
+                        key=(
+                            f"{field_key('batch_label', i)}_"
+                            f"{selected_ingredient_filter.id if selected_ingredient_filter else 'none'}"
+                        ),
                     )
 
-                selected_batch = batch_options.get(batch_label)
+                selected_batch = filtered_batch_options.get(batch_label)
                 selected_ingredient = all_ingredients.get(selected_batch.item_id) if selected_batch else None
                 ingredient_unit = selected_ingredient.unit.short_name if selected_ingredient else ""
                 batch_unit = selected_batch.unit_short_name if selected_batch else ""
                 default_unit = ingredient_unit
                 default_price = float(selected_batch.unit_price) if selected_batch else 0.0
 
-                with cb:
+                with cc:
                     st.caption("Ед. авто")
                     st.write(default_unit or "—")
-                with cc:
+                with cd:
                     qty = st.number_input(
                         f"Кол-во {i + 1}",
                         min_value=0.0,
@@ -544,7 +596,7 @@ with tabs[1]:
                         format="%.3f",
                         key=field_key("ing_qty", i),
                     )
-                with cd:
+                with ce:
                     ingredient_waste_qty = st.number_input(
                         f"Отходы {i + 1}",
                         min_value=0.0,
@@ -552,18 +604,27 @@ with tabs[1]:
                         format="%.3f",
                         key=field_key("ing_waste_qty", i),
                     )
-                with ce:
+                with cf:
                     qty_decimal = Decimal(str(qty))
                     ingredient_waste_decimal = Decimal(str(ingredient_waste_qty))
                     useful_qty = qty_decimal - ingredient_waste_decimal
                     st.metric(f"Полезно {i + 1}", f"{useful_qty:,.3f}")
-                with cf:
+                with cg:
                     line_total = qty_decimal * Decimal(str(default_price))
                     st.metric(f"Стоимость списания {i + 1}", f"{line_total:,.2f}")
                     if useful_qty > 0 and default_unit:
                         useful_unit_cost = line_total / useful_qty
                         st.caption(f"Себест. полезного: {useful_unit_cost:,.2f}/{default_unit}")
 
+                if (
+                    selected_ingredient_filter is not None
+                    and not filtered_batch_options
+                    and (qty_decimal > 0 or ingredient_waste_decimal > 0)
+                ):
+                    validation_errors.append(
+                        f"Строка {i + 1}: по выбранному ингредиенту нет доступных партий."
+                    )
+                    continue
                 if selected_batch is None and (qty_decimal > 0 or ingredient_waste_decimal > 0):
                     validation_errors.append(
                         f"Строка {i + 1}: выберите партию ингредиента или очистите количество и отходы."
