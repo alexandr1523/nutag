@@ -26,6 +26,12 @@ def build_batch_option_label(batch) -> str:
     return f"{batch.date} - {batch.item_name} (Остаток: {batch.current_quantity} {batch.unit_short_name}, ID: {batch.batch_id})"
 
 
+def format_money(value: Decimal) -> str:
+    """Format money values for read-only UI fields."""
+
+    return f"{value:,.2f}"
+
+
 st.set_page_config(page_title="Производство | Nutag", page_icon="🏭", layout="wide")
 
 st.title("🏭 Производство")
@@ -190,8 +196,11 @@ with tabs[1]:
                         qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"bi_qty_{i}")
                     with cd:
                         line_total = Decimal(str(qty)) * Decimal(str(def_price))
-                        st.write("Стоимость списания:")
-                        st.info(f"{line_total:,.2f}")
+                        st.text_input(
+                            f"Стоимость списания {i}",
+                            value=format_money(line_total),
+                            disabled=True,
+                        )
                         if selected_i_batch:
                             st.caption(f"Цена партии: {def_price:,.2f}/{def_unit}")
 
@@ -231,8 +240,14 @@ with tabs[1]:
                     with cc:
                         qty = st.number_input(f"Кол-во з {i}", min_value=0.0, step=0.1, format="%.3f", key=f"bp_qty_{i}")
                     with cd:
-                        st.write("Цена:")
-                        st.info(f"{def_price:,.2f}")
+                        line_total = Decimal(str(qty)) * Decimal(str(def_price))
+                        st.text_input(
+                            f"Стоимость списания з {i}",
+                            value=format_money(line_total),
+                            disabled=True,
+                        )
+                        if selected_p_batch:
+                            st.caption(f"Цена партии: {def_price:,.2f}/{def_unit}")
 
                     if selected_p_batch and qty > 0:
                         prep_obj = prep_objs.get(selected_p_batch.batch_id)
