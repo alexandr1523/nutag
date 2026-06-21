@@ -480,6 +480,19 @@ def update_production_batch(
     return batch
 
 
+def delete_production_batch(session: Session, production_batch_id: int) -> None:
+    """Delete an unused production batch and its stock movements."""
+
+    batch = session.get(ProductionBatch, production_batch_id)
+    if batch is None:
+        raise ValueError("Производственная партия не найдена")
+    if is_production_batch_used(session, production_batch_id):
+        raise ValueError("Производственная партия уже использована в фасовке и не может быть удалена")
+
+    session.delete(batch)
+    session.flush()
+
+
 def list_production_batches(session: Session) -> list[ProductionBatch]:
     """Return production batches ordered from newest to oldest."""
 

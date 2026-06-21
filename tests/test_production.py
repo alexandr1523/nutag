@@ -17,6 +17,7 @@ from nutag.services.production import (
     BatchPreparationInput,
     calculate_output_total,
     create_production_batch,
+    delete_production_batch,
     is_production_batch_used,
     list_production_batches,
     update_production_batch,
@@ -597,6 +598,117 @@ def test_update_production_batch_rejects_batch_used_in_packing() -> None:
                 output_unit=kg,
                 labor_cost="300",
             )
+
+
+def test_delete_production_batch_removes_unused_batch_and_restores_stock() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        product = create_product(session, name="Пельмени")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 13),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="5",
+                    unit_price="80",
+                )
+            ],
+        )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="2",
+            output_unit=kg,
+            ingredient_uses=[
+                BatchIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="2",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+            labor_cost="100",
+        )
+        batch_id = batch.id
+        bulk_output_id = batch.bulk_outputs[0].id
+
+        stock_before_delete = [
+            stock_batch
+            for stock_batch in list_available_stock_batches(session)
+            if stock_batch.batch_type == "purchase" and stock_batch.batch_id == purchase.items[0].id
+        ][0]
+        assert stock_before_delete.current_quantity == Decimal("3.000")
+
+        delete_production_batch(session, batch_id)
+        session.commit()
+
+        assert list_production_batches(session) == []
+        assert [
+            bulk_output
+            for bulk_output in list_available_bulk_finished_product_outputs(session)
+            if bulk_output.bulk_output_id == bulk_output_id
+        ] == []
+        stock_after_delete = [
+            stock_batch
+            for stock_batch in list_available_stock_batches(session)
+            if stock_batch.batch_type == "purchase" and stock_batch.batch_id == purchase.items[0].id
+        ][0]
+        assert stock_after_delete.current_quantity == Decimal("5.000")
+
+
+def test_delete_production_batch_rejects_batch_used_in_packing() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        piece = create_unit(session, name="piece", short_name="pcs")
+        product = create_product(session, name="Пельмени")
+        container = create_packaging(session, name="Контейнер", unit=piece)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.PACKAGING,
+                    packaging=container,
+                    item_name=container.name,
+                    unit=piece,
+                    quantity="10",
+                    unit_price="5",
+                )
+            ],
+        )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="3",
+            output_unit=kg,
+            labor_cost="300",
+        )
+        pack_finished_product(
+            session,
+            packed_on=date(2026, 6, 16),
+            source_bulk_output_id=batch.bulk_outputs[0].id,
+            packaging=container,
+            packaging_unit=piece,
+            packaging_purchase_item_id=purchase.items[0].id,
+            package_size="0.5",
+            package_unit=kg,
+            package_count=2,
+        )
+
+        with pytest.raises(ValueError, match="уже использована в фасовке"):
+            delete_production_batch(session, batch.id)
 
 
 def test_create_production_batch_rejects_selected_preparation_overdraft() -> None:

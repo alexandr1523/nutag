@@ -17,6 +17,7 @@ from nutag.services.production import (
     BatchIngredientInput,
     BatchPreparationInput,
     create_production_batch,
+    delete_production_batch,
     is_production_batch_used,
     list_production_batches,
     update_production_batch,
@@ -549,6 +550,32 @@ with tabs[0]:
                                             st.rerun()
                                     except Exception as e:
                                         st.error(f"Ошибка при сохранении: {e}")
+
+                        with st.expander("Удалить партию"):
+                            st.warning(
+                                "Удаление уберёт производственную партию, её нефасованный выпуск и вернёт "
+                                "ингредиенты/заготовки в доступные остатки. Действие нельзя отменить."
+                            )
+                            delete_confirmation = st.text_input(
+                                "Для удаления введите УДАЛИТЬ",
+                                key=f"production_delete_confirm_{b.id}",
+                            )
+                            if st.button(
+                                "Удалить производственную партию",
+                                key=f"production_delete_{b.id}",
+                                type="secondary",
+                            ):
+                                if delete_confirmation != "УДАЛИТЬ":
+                                    st.error("Введите УДАЛИТЬ для подтверждения удаления.")
+                                else:
+                                    try:
+                                        with SessionLocal() as db_write:
+                                            delete_production_batch(db_write, b.id)
+                                            db_write.commit()
+                                            st.success("Производственная партия удалена.")
+                                            st.rerun()
+                                    except Exception as e:
+                                        st.error(f"Ошибка при удалении: {e}")
         else:
             st.info("История партий пуста")
 
