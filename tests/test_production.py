@@ -115,6 +115,24 @@ def test_create_production_batch_rejects_zero_output_quantity() -> None:
                 product=product,
                 actual_output_quantity="0",
                 output_unit=kg,
+                labor_cost="1",
+            )
+
+
+def test_create_production_batch_rejects_zero_labor_cost() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        product = create_product(session, name="Пельмени")
+        with pytest.raises(ValueError, match="labor cost"):
+            create_production_batch(
+                session,
+                produced_on=date(2026, 6, 15),
+                product=product,
+                actual_output_quantity="1",
+                output_unit=kg,
+                labor_cost="0",
             )
 
 
@@ -130,6 +148,7 @@ def test_create_production_batch_allows_unpacked_output_without_packaged_lines()
             product=product,
             actual_output_quantity="1",
             output_unit=kg,
+            labor_cost="1",
         )
         session.commit()
 
@@ -150,6 +169,7 @@ def test_create_production_batch_creates_full_unpacked_output() -> None:
             product=product,
             actual_output_quantity="5",
             output_unit=kg,
+            labor_cost="1",
         )
         session.commit()
 
@@ -219,6 +239,7 @@ def test_create_production_batch_persists_selected_source_batch_ids() -> None:
                     source_preparation_id=preparation.id,
                 )
             ],
+            labor_cost="1",
         )
         session.commit()
         batch_id = batch.id
@@ -289,6 +310,7 @@ def test_create_production_batch_uses_selected_source_prices() -> None:
                     source_preparation_id=preparation.id,
                 )
             ],
+            labor_cost="1",
         )
         session.commit()
 
@@ -297,7 +319,7 @@ def test_create_production_batch_uses_selected_source_prices() -> None:
         assert batch.preparation_uses[0].unit_cost == Decimal("100.0000")
         assert batch.preparation_uses[0].total_cost == Decimal("200.00")
         assert batch.packaging_uses == []
-        assert batch.total_cost == Decimal("360.00")
+        assert batch.total_cost == Decimal("361.00")
 
 
 def test_update_production_batch_recalculates_unused_batch_and_stock() -> None:
@@ -419,6 +441,7 @@ def test_update_production_batch_allows_current_batch_reserved_quantity() -> Non
                     purchase_item_id=purchase.items[0].id,
                 )
             ],
+            labor_cost="1",
         )
 
         updated = update_production_batch(
@@ -437,10 +460,11 @@ def test_update_production_batch_allows_current_batch_reserved_quantity() -> Non
                     purchase_item_id=purchase.items[0].id,
                 )
             ],
+            labor_cost="1",
         )
 
         assert updated.ingredient_uses[0].quantity == Decimal("2.000")
-        assert updated.total_cost == Decimal("160.00")
+        assert updated.total_cost == Decimal("161.00")
 
 
 def test_update_production_batch_rejects_selected_purchase_overdraft_excluding_current_batch() -> None:
@@ -479,6 +503,7 @@ def test_update_production_batch_rejects_selected_purchase_overdraft_excluding_c
                     purchase_item_id=purchase.items[0].id,
                 )
             ],
+            labor_cost="1",
         )
         create_production_batch(
             session,
@@ -495,6 +520,7 @@ def test_update_production_batch_rejects_selected_purchase_overdraft_excluding_c
                     purchase_item_id=purchase.items[0].id,
                 )
             ],
+            labor_cost="1",
         )
 
         with pytest.raises(ValueError, match="Недостаточно остатка"):
@@ -514,6 +540,7 @@ def test_update_production_batch_rejects_selected_purchase_overdraft_excluding_c
                         purchase_item_id=purchase.items[0].id,
                     )
                 ],
+                labor_cost="1",
             )
 
 
@@ -568,6 +595,7 @@ def test_update_production_batch_rejects_batch_used_in_packing() -> None:
                 product=product,
                 actual_output_quantity="3",
                 output_unit=kg,
+                labor_cost="300",
             )
 
 
@@ -604,6 +632,7 @@ def test_create_production_batch_rejects_selected_preparation_overdraft() -> Non
                         source_preparation_id=preparation.id,
                     )
                 ],
+                labor_cost="1",
             )
 
 
@@ -697,6 +726,7 @@ def test_pack_finished_product_rejects_unpacked_overdraft() -> None:
             product=product,
             actual_output_quantity="1",
             output_unit=kg,
+            labor_cost="1",
         )
 
         with pytest.raises(ValueError, match="Недостаточно нефасованного остатка"):

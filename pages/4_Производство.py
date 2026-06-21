@@ -496,6 +496,8 @@ with tabs[0]:
                                 submit_errors = []
                                 if edit_actual_qty <= 0:
                                     submit_errors.append("Фактический выход должен быть больше 0.")
+                                if edit_labor_cost <= 0:
+                                    submit_errors.append("Укажите трудозатраты больше 0.")
                                 if not (edit_ingredient_uses or edit_preparation_uses) and not edit_validation_errors:
                                     submit_errors.append("Добавьте хотя бы один ингредиент или заготовку.")
                                 submit_errors.extend(edit_validation_errors)
@@ -735,6 +737,8 @@ with tabs[1]:
                 if submitted:
                     if actual_qty <= 0:
                         st.error("Фактический выход должен быть больше 0")
+                    elif calc_labor_cost <= 0:
+                        st.error("Укажите трудозатраты больше 0. Проверьте часы труда и активную ставку.")
                     elif not (ing_uses or p_uses):
                         st.error("Добавьте хотя бы один ингредиент или заготовку")
                     else:

@@ -50,6 +50,7 @@ def create_packed_output(session: Session, *, product: Product, unit_kg: Unit, q
         product=product,
         actual_output_quantity=quantity,
         output_unit=unit_kg,
+        labor_cost="1",
     )
     packing = pack_finished_product(
         session,

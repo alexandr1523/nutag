@@ -170,6 +170,9 @@ def _calculate_production_values(
     actual_output_decimal = to_decimal(actual_output_quantity)
     if actual_output_decimal <= 0:
         raise ValueError("Production batch actual output must be greater than zero")
+    labor_cost_decimal = to_decimal(labor_cost)
+    if labor_cost_decimal <= 0:
+        raise ValueError("Production batch labor cost must be greater than zero")
 
     ingredient_inputs = list(ingredient_uses)
     preparation_inputs = list(preparation_uses)
@@ -252,7 +255,7 @@ def _calculate_production_values(
     total_cost = calculate_batch_cost(
         raw_material_costs=ingredient_total_costs,
         preparation_costs=preparation_total_costs,
-        labor_costs=[labor_cost],
+        labor_costs=[labor_cost_decimal],
         equipment_depreciation=equipment_depreciation,
         allocated_overhead=allocated_overhead,
     )

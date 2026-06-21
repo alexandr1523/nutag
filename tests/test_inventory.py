@@ -134,6 +134,7 @@ def test_packing_does_not_consume_ingredient_batches_with_same_id() -> None:
             product=product,
             actual_output_quantity="1",
             output_unit=kg,
+            labor_cost="1",
         )
         pack_finished_product(
             session,

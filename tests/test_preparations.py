@@ -325,6 +325,7 @@ def test_update_preparation_rejects_used_preparation() -> None:
                     source_preparation_id=preparation.id,
                 )
             ],
+            labor_cost="1",
         )
 
         assert is_preparation_used(session, preparation.id)
@@ -431,6 +432,7 @@ def test_delete_preparation_rejects_used_preparation() -> None:
                     source_preparation_id=preparation.id,
                 )
             ],
+            labor_cost="1",
         )
 
         with pytest.raises(ValueError, match="использована в производстве"):
