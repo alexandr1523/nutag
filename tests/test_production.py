@@ -17,7 +17,9 @@ from nutag.services.production import (
     BatchPreparationInput,
     calculate_output_total,
     create_production_batch,
+    is_production_batch_used,
     list_production_batches,
+    update_production_batch,
 )
 from nutag.services.purchases import PurchaseLineInput, create_purchase
 from nutag.services.references import (
@@ -296,6 +298,277 @@ def test_create_production_batch_uses_selected_source_prices() -> None:
         assert batch.preparation_uses[0].total_cost == Decimal("200.00")
         assert batch.packaging_uses == []
         assert batch.total_cost == Decimal("360.00")
+
+
+def test_update_production_batch_recalculates_unused_batch_and_stock() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        product = create_product(session, name="Пельмени")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 13),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="5",
+                    unit_price="80",
+                )
+            ],
+        )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="2",
+            output_unit=kg,
+            ingredient_uses=[
+                BatchIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="2",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+            labor_cost="100",
+        )
+        batch_id = batch.id
+
+        updated = update_production_batch(
+            session,
+            batch_id,
+            produced_on=date(2026, 6, 16),
+            product=product,
+            actual_output_quantity="3",
+            output_unit=kg,
+            ingredient_uses=[
+                BatchIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="3",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+            labor_cost="120",
+            allocated_overhead="30",
+            comment="Исправлено",
+        )
+        session.commit()
+
+        assert updated.id == batch_id
+        assert updated.produced_on == date(2026, 6, 16)
+        assert updated.actual_output_quantity == Decimal("3.000")
+        assert updated.labor_cost == Decimal("120.00")
+        assert updated.allocated_overhead == Decimal("30.00")
+        assert updated.total_cost == Decimal("390.00")
+        assert updated.unit_cost == Decimal("130.0000")
+        assert updated.comment == "Исправлено"
+        assert len(updated.ingredient_uses) == 1
+        assert updated.ingredient_uses[0].quantity == Decimal("3.000")
+        assert updated.ingredient_uses[0].unit_cost == Decimal("80.0000")
+        assert updated.bulk_outputs[0].quantity == Decimal("3.000")
+
+        stock = [
+            stock_batch
+            for stock_batch in list_available_stock_batches(session)
+            if stock_batch.batch_type == "purchase" and stock_batch.batch_id == purchase.items[0].id
+        ][0]
+        assert stock.current_quantity == Decimal("2.000")
+
+
+def test_update_production_batch_allows_current_batch_reserved_quantity() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        product = create_product(session, name="Пельмени")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 13),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="2",
+                    unit_price="80",
+                )
+            ],
+        )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="2",
+            output_unit=kg,
+            ingredient_uses=[
+                BatchIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="2",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+        )
+
+        updated = update_production_batch(
+            session,
+            batch.id,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="2",
+            output_unit=kg,
+            ingredient_uses=[
+                BatchIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="2",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+        )
+
+        assert updated.ingredient_uses[0].quantity == Decimal("2.000")
+        assert updated.total_cost == Decimal("160.00")
+
+
+def test_update_production_batch_rejects_selected_purchase_overdraft_excluding_current_batch() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        product = create_product(session, name="Пельмени")
+        flour = create_ingredient(session, name="Мука", unit=kg)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 13),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.INGREDIENT,
+                    ingredient=flour,
+                    item_name=flour.name,
+                    unit=kg,
+                    quantity="2",
+                    unit_price="80",
+                )
+            ],
+        )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="1",
+            output_unit=kg,
+            ingredient_uses=[
+                BatchIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="1",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+        )
+        create_production_batch(
+            session,
+            produced_on=date(2026, 6, 16),
+            product=product,
+            actual_output_quantity="1",
+            output_unit=kg,
+            ingredient_uses=[
+                BatchIngredientInput(
+                    ingredient=flour,
+                    unit=kg,
+                    quantity="0.5",
+                    unit_cost="999",
+                    purchase_item_id=purchase.items[0].id,
+                )
+            ],
+        )
+
+        with pytest.raises(ValueError, match="Недостаточно остатка"):
+            update_production_batch(
+                session,
+                batch.id,
+                produced_on=date(2026, 6, 17),
+                product=product,
+                actual_output_quantity="2",
+                output_unit=kg,
+                ingredient_uses=[
+                    BatchIngredientInput(
+                        ingredient=flour,
+                        unit=kg,
+                        quantity="2",
+                        unit_cost="999",
+                        purchase_item_id=purchase.items[0].id,
+                    )
+                ],
+            )
+
+
+def test_update_production_batch_rejects_batch_used_in_packing() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        piece = create_unit(session, name="piece", short_name="pcs")
+        product = create_product(session, name="Пельмени")
+        container = create_packaging(session, name="Контейнер", unit=piece)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.PACKAGING,
+                    packaging=container,
+                    item_name=container.name,
+                    unit=piece,
+                    quantity="10",
+                    unit_price="5",
+                )
+            ],
+        )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="3",
+            output_unit=kg,
+            labor_cost="300",
+        )
+        pack_finished_product(
+            session,
+            packed_on=date(2026, 6, 16),
+            source_bulk_output_id=batch.bulk_outputs[0].id,
+            packaging=container,
+            packaging_unit=piece,
+            packaging_purchase_item_id=purchase.items[0].id,
+            package_size="0.5",
+            package_unit=kg,
+            package_count=2,
+        )
+
+        assert is_production_batch_used(session, batch.id)
+        with pytest.raises(ValueError, match="уже использована в фасовке"):
+            update_production_batch(
+                session,
+                batch.id,
+                produced_on=date(2026, 6, 17),
+                product=product,
+                actual_output_quantity="3",
+                output_unit=kg,
+            )
 
 
 def test_create_production_batch_rejects_selected_preparation_overdraft() -> None:
