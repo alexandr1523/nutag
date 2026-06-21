@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import streamlit as st
 
 from nutag.db.init_db import initialize_database
-from nutag.db.models import Equipment, Ingredient, LaborRate, Preparation, Product, PurchaseItemType, Unit
+from nutag.db.models import Ingredient, LaborRate, Preparation, Product, PurchaseItemType, Unit
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.inventory import ExtendedItemType, list_available_stock_batches
 from nutag.services.preparations import list_preparations
@@ -575,8 +575,6 @@ with tabs[1]:
         all_products = {p.name: p for p in db.query(Product).all()}
         all_units = {u.short_name: u for u in db.query(Unit).all()}
         unit_names = list(all_units.keys())
-        all_equipment = {e.name: e for e in db.query(Equipment).all()}
-
         current_labor_rate = db.query(LaborRate).filter(LaborRate.is_active.is_(True)).first()
         labor_rate_val = float(current_labor_rate.hourly_rate) if current_labor_rate else 0.0
 
@@ -603,20 +601,13 @@ with tabs[1]:
                     out_unit_name = st.selectbox("Ед. изм. выхода", options=list(all_units.keys()))
 
                 st.subheader("Расходы ресурсов")
-                row1_c1, row1_c2, row1_c3 = st.columns(3)
+                row1_c1, row1_c2 = st.columns(2)
                 with row1_c1:
                     labor_h = st.number_input("Труд (часы)", min_value=0.0, step=0.1)
                     calc_labor_cost = Decimal(str(labor_h * labor_rate_val))
                     st.write(f"Стоимость труда: **{calc_labor_cost:,.2f}**")
 
                 with row1_c2:
-                    selected_equip = st.selectbox("Оборудование", options=[""] + list(all_equipment.keys()))
-                    equip_h = st.number_input("Работа оборуд. (часы)", min_value=0.0, step=0.1)
-                    equip_rate = float(all_equipment[selected_equip].hourly_cost) if selected_equip else 0.0
-                    calc_depr = Decimal(str(equip_h * equip_rate))
-                    st.write(f"Амортизация: **{calc_depr:,.2f}**")
-
-                with row1_c3:
                     overhead = st.number_input("Накладные расходы", min_value=0.0, step=10.0, format="%.2f")
 
                 st.subheader("Ингредиенты (до 3)")
@@ -780,7 +771,7 @@ with tabs[1]:
                                     ingredient_uses=db_ing_uses,
                                     preparation_uses=db_p_uses,
                                     labor_cost=calc_labor_cost,
-                                    equipment_depreciation=calc_depr,
+                                    equipment_depreciation=Decimal("0"),
                                     allocated_overhead=Decimal(str(overhead)),
                                     comment=batch_comment,
                                 )
