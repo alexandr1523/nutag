@@ -20,11 +20,12 @@ def format_money(value: Decimal | int | float | str) -> str:
 
 
 def build_bulk_label(stock) -> str:
+    stock_total_cost = Decimal(str(stock.current_quantity)) * Decimal(str(stock.unit_cost))
     return (
         f"{stock.product_name} | нефасованный остаток #{stock.bulk_output_id} | "
         f"партия производства #{stock.output.batch_id} от {stock.produced_on} | "
         f"остаток {stock.current_quantity:,.3f} {stock.unit_short_name} | "
-        f"себестоимость {stock.unit_cost:,.4f}"
+        f"себестоимость остатка {stock_total_cost:,.2f}"
     )
 
 
@@ -99,6 +100,11 @@ with tabs[0]:
             selected_packaging_batch = packaging_options[packaging_label]
             selected_packaging = packaging_by_id.get(int(selected_packaging_batch.item_id))
 
+            st.caption(
+                f"Нефасованный остаток списывается в единицах: {selected_bulk.unit_short_name}. "
+                f"Упаковка списывается в единицах: {selected_packaging_batch.unit_short_name}."
+            )
+
             st.subheader("Параметры фасовки")
             p1, p2, p3 = st.columns(3)
             with p1:
@@ -130,7 +136,7 @@ with tabs[0]:
             st.subheader("Расчёт")
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Итоговый выпуск", f"{total_quantity:,.3f} {selected_bulk.unit_short_name}")
-            m2.metric("Стоимость остатка", format_money(bulk_value))
+            m2.metric("Стоимость списываемого нефасованного остатка", format_money(bulk_value))
             m3.metric("Стоимость упаковки", format_money(packaging_value))
             m4.metric("Себестоимость за ед.", f"{unit_cost:,.4f}")
 
@@ -168,6 +174,10 @@ with tabs[0]:
                     submit_errors.append("Единица нефасованного остатка отсутствует в справочнике.")
                 if selected_packaging_batch.unit_short_name not in units_by_short_name:
                     submit_errors.append("Единица упаковки отсутствует в справочнике.")
+                if use_by is not None and use_by < packed_on:
+                    submit_errors.append("Дата 'Годен до' не может быть раньше даты фасовки.")
+                if frozen_on is not None and use_by is not None and use_by < frozen_on:
+                    submit_errors.append("Дата 'Годен до' не может быть раньше даты заморозки.")
 
                 if submit_errors:
                     for error in submit_errors:
