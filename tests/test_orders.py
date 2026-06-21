@@ -76,6 +76,7 @@ def test_create_order():
         product = Product(name="Pelmeni")
         session.add(product)
         session.flush()
+        output = create_packed_output(session, product=product, unit_kg=unit_kg, quantity="2")
 
         # Input: one order item
         items = [
@@ -84,7 +85,8 @@ def test_create_order():
                 package_size=Decimal("0.5"),
                 package_unit=unit_kg,
                 package_count=2,
-                unit_price=Decimal("450.00")
+                unit_price=Decimal("450.00"),
+                batch_output=output,
             )
         ]
 
@@ -121,8 +123,16 @@ def test_list_orders():
         product = Product(name="Pelmeni")
         session.add(product)
         session.flush()
+        output = create_packed_output(session, product=product, unit_kg=unit_kg, quantity="2")
 
-        item = OrderItemInput(product=product, package_size=0.5, package_unit=unit_kg, package_count=1, unit_price=500)
+        item = OrderItemInput(
+            product=product,
+            package_size=0.5,
+            package_unit=unit_kg,
+            package_count=1,
+            unit_price=500,
+            batch_output=output,
+        )
         
         create_order(session, order_date=date(2026, 6, 10), customer_name="Old", items=[item])
         create_order(session, order_date=date(2026, 6, 14), customer_name="New", items=[item])
@@ -176,6 +186,91 @@ def test_create_order_persists_selected_finished_output() -> None:
         assert len(available_outputs) == 1
         assert available_outputs[0].output_id == output_id
         assert available_outputs[0].current_quantity == Decimal("1.000")
+
+
+def test_create_order_rejects_blank_customer_name() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        unit_kg = Unit(name="Kilogram", short_name="kg")
+        session.add(unit_kg)
+        product = Product(name="Пельмени")
+        session.add(product)
+        session.flush()
+        output = create_packed_output(session, product=product, unit_kg=unit_kg, quantity="1")
+
+        with pytest.raises(ValueError, match="Укажите имя клиента"):
+            create_order(
+                session,
+                order_date=date(2026, 6, 15),
+                customer_name="  ",
+                items=[
+                    OrderItemInput(
+                        product=product,
+                        package_size="0.5",
+                        package_unit=unit_kg,
+                        package_count=1,
+                        unit_price="450",
+                        batch_output=output,
+                    )
+                ],
+            )
+
+
+def test_create_order_rejects_missing_finished_output() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        unit_kg = Unit(name="Kilogram", short_name="kg")
+        session.add(unit_kg)
+        product = Product(name="Пельмени")
+        session.add(product)
+        session.flush()
+
+        with pytest.raises(ValueError, match="Выберите партию готовой продукции"):
+            create_order(
+                session,
+                order_date=date(2026, 6, 15),
+                customer_name="Клиент",
+                items=[
+                    OrderItemInput(
+                        product=product,
+                        package_size="0.5",
+                        package_unit=unit_kg,
+                        package_count=1,
+                        unit_price="450",
+                    )
+                ],
+            )
+
+
+def test_create_order_rejects_zero_package_size() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        unit_kg = Unit(name="Kilogram", short_name="kg")
+        session.add(unit_kg)
+        product = Product(name="Пельмени")
+        session.add(product)
+        session.flush()
+        output = create_packed_output(session, product=product, unit_kg=unit_kg, quantity="1")
+
+        with pytest.raises(ValueError, match="Размер упаковки"):
+            create_order(
+                session,
+                order_date=date(2026, 6, 15),
+                customer_name="Клиент",
+                items=[
+                    OrderItemInput(
+                        product=product,
+                        package_size="0",
+                        package_unit=unit_kg,
+                        package_count=1,
+                        unit_price="450",
+                        batch_output=output,
+                    )
+                ],
+            )
 
 
 def test_create_order_rejects_selected_finished_output_overdraft() -> None:

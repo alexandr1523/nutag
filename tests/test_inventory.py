@@ -1,9 +1,23 @@
 from datetime import date
 from decimal import Decimal
 
+from sqlalchemy import delete
+
 from nutag.db import create_database, create_engine_for_url, create_session_factory
-from nutag.db.models import PurchaseItemType
-from nutag.services.inventory import list_available_stock_batches, list_inventory_balances
+from nutag.db.models import (
+    FinishedProductBulkOutput,
+    FinishedProductOutput,
+    FinishedProductPacking,
+    ProductionBatch,
+    PurchaseItemType,
+)
+from nutag.services.inventory import (
+    list_available_bulk_finished_product_outputs,
+    list_available_finished_product_outputs,
+    list_available_stock_batches,
+    list_inventory_balances,
+)
+from nutag.services.maintenance import reset_operational_data
 from nutag.services.packing import pack_finished_product
 from nutag.services.purchases import PurchaseLineInput, create_purchase
 from nutag.services.production import create_production_batch
@@ -157,3 +171,138 @@ def test_packing_does_not_consume_ingredient_batches_with_same_id() -> None:
 
     assert ingredient_batch.current_quantity == Decimal("5.000")
     assert packaging_batch.current_quantity == Decimal("6.000")
+
+
+def test_reset_operational_data_removes_finished_product_outputs_and_packings() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        piece = create_unit(session, name="piece", short_name="pcs")
+        product = create_product(session, name="Пельмени")
+        container = create_packaging(session, name="Контейнер", unit=piece)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.PACKAGING,
+                    packaging=container,
+                    item_name=container.name,
+                    unit=piece,
+                    quantity="10",
+                    unit_price="5",
+                )
+            ],
+        )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="3",
+            output_unit=kg,
+            labor_cost="300",
+        )
+        pack_finished_product(
+            session,
+            packed_on=date(2026, 6, 16),
+            source_bulk_output_id=batch.bulk_outputs[0].id,
+            packaging=container,
+            packaging_unit=piece,
+            packaging_purchase_item_id=purchase.items[0].id,
+            package_size="0.5",
+            package_unit=kg,
+            package_count=4,
+        )
+        session.commit()
+
+        reset_operational_data(session)
+
+        assert session.query(FinishedProductPacking).count() == 0
+        assert session.query(FinishedProductOutput).count() == 0
+        assert session.query(FinishedProductBulkOutput).count() == 0
+        assert session.query(ProductionBatch).count() == 0
+        assert list_inventory_balances(session) == []
+        assert list_available_finished_product_outputs(session) == []
+        assert list_available_bulk_finished_product_outputs(session) == []
+
+
+def test_inventory_balances_skip_orphan_finished_product_outputs() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        product = create_product(session, name="Пельмени")
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="3",
+            output_unit=kg,
+            labor_cost="300",
+        )
+        batch_id = batch.id
+        session.commit()
+
+        session.execute(delete(ProductionBatch).where(ProductionBatch.id == batch_id))
+        session.commit()
+        session.expire_all()
+
+        assert list_inventory_balances(session) == []
+        assert list_available_bulk_finished_product_outputs(session) == []
+
+
+def test_available_bulk_outputs_skip_orphan_packings_without_finished_output() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="kilogram", short_name="kg")
+        piece = create_unit(session, name="piece", short_name="pcs")
+        product = create_product(session, name="Пельмени")
+        container = create_packaging(session, name="Контейнер", unit=piece)
+        purchase = create_purchase(
+            session,
+            purchase_date=date(2026, 6, 14),
+            lines=[
+                PurchaseLineInput(
+                    item_type=PurchaseItemType.PACKAGING,
+                    packaging=container,
+                    item_name=container.name,
+                    unit=piece,
+                    quantity="10",
+                    unit_price="5",
+                )
+            ],
+        )
+        batch = create_production_batch(
+            session,
+            produced_on=date(2026, 6, 15),
+            product=product,
+            actual_output_quantity="3",
+            output_unit=kg,
+            labor_cost="300",
+        )
+        packing = pack_finished_product(
+            session,
+            packed_on=date(2026, 6, 16),
+            source_bulk_output_id=batch.bulk_outputs[0].id,
+            packaging=container,
+            packaging_unit=piece,
+            packaging_purchase_item_id=purchase.items[0].id,
+            package_size="0.5",
+            package_unit=kg,
+            package_count=4,
+        )
+        finished_output_id = packing.finished_output.id
+        session.commit()
+
+        session.execute(delete(FinishedProductOutput).where(FinishedProductOutput.id == finished_output_id))
+        session.commit()
+        session.expire_all()
+
+        bulk_outputs = list_available_bulk_finished_product_outputs(session)
+        stock_batches = list_available_stock_batches(session)
+
+        assert len(bulk_outputs) == 1
+        assert bulk_outputs[0].current_quantity == Decimal("3.000")
+        assert stock_batches[0].current_quantity == Decimal("10.000")

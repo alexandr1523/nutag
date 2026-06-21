@@ -60,6 +60,9 @@ def create_order(
 ) -> Order:
     """Create a customer order with items and calculate total amount."""
 
+    if not customer_name.strip():
+        raise ValueError("Укажите имя клиента")
+
     item_inputs = list(items)
     if not item_inputs:
         raise ValueError("Order must contain at least one item")
@@ -74,28 +77,32 @@ def create_order(
             unit_price=line.unit_price,
         )
         total_amount += line_total
-        
-        total_quantity = to_decimal(line.package_size) * Decimal(line.package_count)
 
-        if line.batch_output is not None:
-            reserved_output_quantities[line.batch_output.id] = reserved_output_quantities.get(
-                line.batch_output.id,
-                Decimal("0"),
-            ) + total_quantity
-            get_available_finished_product_output(
-                session,
-                batch_output_id=line.batch_output.id,
-                expected_product_id=line.product.id,
-                expected_package_size=line.package_size,
-                expected_unit_short_name=line.package_unit.short_name,
-                quantity=reserved_output_quantities[line.batch_output.id],
-            )
+        package_size = to_decimal(line.package_size)
+        if package_size <= 0:
+            raise ValueError("Размер упаковки должен быть больше нуля")
+        if line.batch_output is None:
+            raise ValueError("Выберите партию готовой продукции")
+
+        total_quantity = package_size * Decimal(line.package_count)
+        reserved_output_quantities[line.batch_output.id] = reserved_output_quantities.get(
+            line.batch_output.id,
+            Decimal("0"),
+        ) + total_quantity
+        get_available_finished_product_output(
+            session,
+            batch_output_id=line.batch_output.id,
+            expected_product_id=line.product.id,
+            expected_package_size=line.package_size,
+            expected_unit_short_name=line.package_unit.short_name,
+            quantity=reserved_output_quantities[line.batch_output.id],
+        )
         
         order_items.append(
             OrderItem(
                 product=line.product,
                 batch_output=line.batch_output,
-                package_size=to_decimal(line.package_size),
+                package_size=package_size,
                 package_unit=line.package_unit,
                 package_count=line.package_count,
                 total_quantity=total_quantity,

@@ -211,6 +211,8 @@ def get_available_finished_product_output(
     output = session.get(FinishedProductOutput, batch_output_id)
     if output is None:
         raise ValueError("Выбранная партия готовой продукции не найдена")
+    if output.batch is None or output.package_unit is None:
+        raise ValueError("Выбранная партия готовой продукции недоступна")
     if output.batch.product_id != expected_product_id:
         raise ValueError("Выбранная партия готовой продукции не соответствует продукту заказа")
     if output.package_size != to_decimal(expected_package_size):
@@ -246,6 +248,10 @@ def list_available_finished_product_outputs(session: Session) -> list[FinishedPr
     stocks: list[FinishedProductStock] = []
     outputs = session.query(FinishedProductOutput).order_by(FinishedProductOutput.id).all()
     for output in outputs:
+        if output.batch is None or output.batch.product is None or output.package_unit is None:
+            continue
+        if output.package_size <= 0:
+            continue
         used_quantity = used_by_output_id.get(output.id, Decimal("0"))
         current_quantity = output.total_quantity - used_quantity
         if current_quantity <= 0:
@@ -278,6 +284,8 @@ def list_available_bulk_finished_product_outputs(session: Session) -> list[BulkF
 
     used_by_output_id: dict[int, Decimal] = {}
     for packing in session.query(FinishedProductPacking).all():
+        if packing.finished_output is None:
+            continue
         used_by_output_id[packing.source_bulk_output_id] = (
             used_by_output_id.get(packing.source_bulk_output_id, Decimal("0"))
             + packing.finished_output.total_quantity
@@ -286,6 +294,8 @@ def list_available_bulk_finished_product_outputs(session: Session) -> list[BulkF
     stocks: list[BulkFinishedProductStock] = []
     outputs = session.query(FinishedProductBulkOutput).order_by(FinishedProductBulkOutput.id).all()
     for output in outputs:
+        if output.batch is None or output.batch.product is None or output.unit is None:
+            continue
         used_quantity = used_by_output_id.get(output.id, Decimal("0"))
         current_quantity = output.quantity - used_quantity
         if current_quantity <= 0:
@@ -321,6 +331,7 @@ def list_available_stock_batches(session: Session) -> list[StockBatch]:
         BatchIngredientUse,
         BatchPreparationUse,
         BatchPackagingUse,
+        FinishedProductOutput,
         FinishedProductPacking,
     )
     from sqlalchemy import func
@@ -381,6 +392,7 @@ def list_available_stock_batches(session: Session) -> list[StockBatch]:
         FinishedProductPacking.packaging_purchase_item_id,
         func.sum(FinishedProductPacking.packaging_quantity),
     )\
+        .join(FinishedProductOutput, FinishedProductOutput.id == FinishedProductPacking.finished_output_id)\
         .filter(FinishedProductPacking.packaging_purchase_item_id.isnot(None))\
         .group_by(FinishedProductPacking.packaging_purchase_item_id)\
         .all()
@@ -545,6 +557,8 @@ def list_inventory_balances(session: Session) -> list[InventoryBalance]:
 
     bulk_outputs = session.scalars(select(FinishedProductBulkOutput)).all()
     for output in bulk_outputs:
+        if output.batch is None or output.batch.product is None or output.unit is None:
+            continue
         add_inflow(
             ExtendedItemType.PRODUCT,
             output.batch.product_id,
@@ -556,20 +570,29 @@ def list_inventory_balances(session: Session) -> list[InventoryBalance]:
 
     packings = session.scalars(select(FinishedProductPacking)).all()
     for packing in packings:
-        add_outflow(
-            ExtendedItemType.PRODUCT,
-            packing.source_bulk_output.batch.product_id,
-            packing.source_bulk_output.batch.product.name,
-            packing.source_bulk_output.unit.short_name,
-            packing.finished_output.total_quantity,
-        )
-        add_outflow(
-            PurchaseItemType.PACKAGING,
-            packing.packaging_id,
-            packing.packaging.name,
-            packing.packaging_unit.short_name,
-            packing.packaging_quantity,
-        )
+        source_output = packing.source_bulk_output
+        if (
+            source_output is not None
+            and source_output.batch is not None
+            and source_output.batch.product is not None
+            and source_output.unit is not None
+            and packing.finished_output is not None
+        ):
+            add_outflow(
+                ExtendedItemType.PRODUCT,
+                source_output.batch.product_id,
+                source_output.batch.product.name,
+                source_output.unit.short_name,
+                packing.finished_output.total_quantity,
+            )
+        if packing.packaging is not None and packing.packaging_unit is not None:
+            add_outflow(
+                PurchaseItemType.PACKAGING,
+                packing.packaging_id,
+                packing.packaging.name,
+                packing.packaging_unit.short_name,
+                packing.packaging_quantity,
+            )
 
     # 4. Order outflows (Finished products)
     orders = session.scalars(select(Order)).all()

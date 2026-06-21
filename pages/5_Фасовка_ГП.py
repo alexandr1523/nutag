@@ -243,8 +243,24 @@ with tabs[1]:
         if not packings:
             st.info("Операций фасовки пока нет.")
         else:
+            valid_packings = [
+                packing
+                for packing in packings
+                if packing.finished_output is not None
+                and packing.finished_output.batch is not None
+                and packing.finished_output.batch.product is not None
+                and packing.finished_output.package_unit is not None
+                and packing.packaging is not None
+            ]
+            invalid_packings = [packing for packing in packings if packing not in valid_packings]
+            if invalid_packings:
+                st.warning(
+                    "Найдены повреждённые старые записи фасовки после прежней очистки данных: "
+                    f"{len(invalid_packings)}. Они не участвуют в расчётах и не показаны в истории."
+                )
+
             rows = []
-            for packing in packings:
+            for packing in valid_packings:
                 rows.append(
                     {
                         "Дата": packing.packed_on,
@@ -272,7 +288,10 @@ with tabs[1]:
                     }
                 )
 
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            if rows:
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("Корректных операций фасовки пока нет.")
 
             st.subheader("Удаление ошибочной фасовки")
             st.caption(
@@ -280,7 +299,7 @@ with tabs[1]:
                 "После удаления нефасованный остаток и упаковка снова станут доступными."
             )
 
-            for packing in packings:
+            for packing in valid_packings:
                 is_used = is_finished_product_packing_used(db, packing.id)
                 title = (
                     f"Фасовка #{packing.id}: {packing.finished_output.batch.product.name}, "

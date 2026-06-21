@@ -78,6 +78,17 @@ with tabs[0]:
 # --- New Order Tab ---
 with tabs[1]:
     st.header("Новый заказ")
+    saved_message = st.session_state.pop("order_saved_message", None)
+    if saved_message:
+        st.success(saved_message)
+
+    if "order_form_version" not in st.session_state:
+        st.session_state.order_form_version = 0
+    form_version = st.session_state.order_form_version
+
+    def field_key(name: str, idx: int | None = None) -> str:
+        suffix = f"_{idx}" if idx is not None else ""
+        return f"order_{form_version}_{name}{suffix}"
     
     with SessionLocal() as db:
         all_products = {p.name: p for p in db.query(Product).all()}
@@ -95,77 +106,154 @@ with tabs[1]:
         
         if not all_products:
             st.warning("Сначала добавьте продукты в Справочниках")
+        elif not available_output_options:
+            st.warning("Нет доступных партий готовой продукции. Сначала выполните фасовку готовой продукции.")
         else:
-            with st.form("new_order_form"):
+            with st.container():
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    order_date = st.date_input("Дата заказа", value=date.today())
+                    order_date = st.date_input("Дата заказа", value=date.today(), key=field_key("date"))
                 with col2:
-                    customer_name = st.text_input("Имя клиента")
+                    customer_name = st.text_input("Имя клиента", key=field_key("customer"))
                 with col3:
-                    customer_contact = st.text_input("Контакт (телефон/тг)")
+                    customer_contact = st.text_input("Контакт (телефон/тг)", key=field_key("contact"))
                 
                 c4, c5, c6 = st.columns(3)
                 with c4:
-                    o_status = st.selectbox("Статус заказа", options=[s.value for s in OrderStatus])
+                    o_status = st.selectbox("Статус заказа", options=[s.value for s in OrderStatus], key=field_key("order_status"))
                 with c5:
-                    p_status = st.selectbox("Статус оплаты", options=[s.value for s in PaymentStatus])
+                    p_status = st.selectbox("Статус оплаты", options=[s.value for s in PaymentStatus], key=field_key("payment_status"))
                 with c6:
-                    r_status = st.selectbox("Статус резерва", options=[s.value for s in ReservationStatus])
+                    r_status = st.selectbox("Статус резерва", options=[s.value for s in ReservationStatus], key=field_key("reservation_status"))
                 
-                delivery_cost = st.number_input("Стоимость доставки", min_value=0.0, step=10.0, format="%.2f")
-                order_comment = st.text_area("Комментарий к заказу")
+                delivery_cost = st.number_input(
+                    "Стоимость доставки",
+                    min_value=0.0,
+                    step=10.0,
+                    format="%.2f",
+                    key=field_key("delivery_cost"),
+                )
+                order_comment = st.text_area("Комментарий к заказу", key=field_key("comment"))
                 
                 st.subheader("Позиции (до 3 в MVP)")
                 order_items = []
+                validation_errors: list[str] = []
+                requested_output_quantities: dict[int, Decimal] = {}
+                outputs_by_id = {stock.output_id: stock for stock in available_outputs}
                 for i in range(3):
                     st.markdown(f"**Позиция {i+1}**")
-                    ca, cb, cc, cd, ce, cf = st.columns([3, 2, 1, 2, 2, 5])
+                    ca, cb, cc, cd, ce = st.columns([3, 5, 2, 2, 2])
                     with ca:
-                        p_name = st.selectbox(f"Продукт {i}", options=[""] + list(all_products.keys()), key=f"oi_prod_{i}")
-                    with cb:
-                        p_size = st.number_input(f"Размер упак {i}", min_value=0.0, step=0.1, format="%.3f", key=f"oi_size_{i}")
-                    with cc:
-                        p_unit = st.selectbox(f"Ед {i}", options=list(all_units.keys()), key=f"oi_unit_{i}")
-                    with cd:
-                        p_count = st.number_input(f"Кол-во упак {i}", min_value=0, step=1, key=f"oi_count_{i}")
-                    with ce:
-                        p_price = st.number_input(f"Цена за упак {i}", min_value=0.0, step=50.0, format="%.2f", key=f"oi_price_{i}")
+                        p_name = st.selectbox(
+                            f"Продукт {i + 1}",
+                            options=[""] + list(all_products.keys()),
+                            key=field_key("product", i),
+                        )
                     matching_output_options = []
-                    if p_name and p_size > 0:
-                        package_size = Decimal(str(p_size))
+                    if p_name:
                         matching_output_options = [
                             label
                             for label, stock in available_output_options.items()
                             if stock.product_id == all_products[p_name].id
-                            and stock.package_size == package_size
-                            and stock.unit_short_name == p_unit
                         ]
-                    with cf:
+                    with cb:
                         output_label = st.selectbox(
-                            f"Партия готовой продукции {i}",
+                            f"Партия готовой продукции {i + 1}",
                             options=[""] + matching_output_options,
-                            key=f"oi_output_{i}",
+                            key=f"{field_key('output', i)}_{all_products[p_name].id if p_name else 'none'}",
                             help="Выберите конкретную доступную партию готовой продукции, если заказ списывается из наличия.",
                         )
+                        if p_name and not matching_output_options:
+                            st.caption("Нет доступных партий для выбранного продукта.")
+                    selected_stock = available_output_options.get(output_label) if output_label else None
+                    with cc:
+                        st.caption(f"Фасовка {i + 1}")
+                        if selected_stock:
+                            st.write(f"{selected_stock.package_size:,.3f} {selected_stock.unit_short_name}")
+                            package_cost = (
+                                Decimal(str(selected_stock.package_size))
+                                * Decimal(str(selected_stock.unit_cost))
+                            )
+                            st.caption(f"Себестоимость: {package_cost:,.2f}")
+                        else:
+                            st.write("-")
+                    with cd:
+                        p_count = st.number_input(
+                            f"Кол-во фасовок {i + 1}",
+                            min_value=0,
+                            step=1,
+                            key=field_key("package_count", i),
+                        )
+                    with ce:
+                        p_price = st.number_input(
+                            f"Цена за фасовку {i + 1}",
+                            min_value=0.0,
+                            step=50.0,
+                            format="%.2f",
+                            key=field_key("unit_price", i),
+                        )
                     
-                    if p_name and p_count > 0:
-                        selected_output = available_output_options[output_label].output if output_label else None
-                        order_items.append(OrderItemInput(
+                    row_is_active = bool(p_name) or p_count > 0 or p_price > 0 or bool(output_label)
+                    if not row_is_active:
+                        continue
+
+                    row_label = f"Позиция {i + 1}"
+                    if not p_name:
+                        validation_errors.append(f"{row_label}: выберите продукт или очистите строку.")
+                        continue
+                    if p_count <= 0:
+                        validation_errors.append(f"{row_label}: укажите количество фасовок больше 0.")
+                        continue
+                    if not output_label:
+                        validation_errors.append(f"{row_label}: выберите партию готовой продукции.")
+                        continue
+                    if selected_stock is None:
+                        validation_errors.append(f"{row_label}: выбранная партия готовой продукции недоступна.")
+                        continue
+                    if selected_stock.unit_short_name not in all_units:
+                        validation_errors.append(
+                            f"{row_label}: единица партии '{selected_stock.unit_short_name}' отсутствует в справочнике."
+                        )
+                        continue
+
+                    selected_output = selected_stock.output
+                    requested_quantity = Decimal(str(selected_stock.package_size)) * Decimal(p_count)
+                    requested_output_quantities[selected_stock.output_id] = (
+                        requested_output_quantities.get(selected_stock.output_id, Decimal("0"))
+                        + requested_quantity
+                    )
+                    order_items.append(
+                        OrderItemInput(
                             product=all_products[p_name],
-                            package_size=Decimal(str(p_size)),
-                            package_unit=all_units[p_unit],
+                            package_size=Decimal(str(selected_stock.package_size)),
+                            package_unit=all_units[selected_stock.unit_short_name],
                             package_count=p_count,
                             unit_price=Decimal(str(p_price)),
                             batch_output=selected_output,
-                        ))
+                        )
+                    )
+
+                for output_id, requested_quantity in requested_output_quantities.items():
+                    available_quantity = Decimal(str(outputs_by_id[output_id].current_quantity))
+                    if requested_quantity > available_quantity:
+                        stock = outputs_by_id[output_id]
+                        validation_errors.append(
+                            f"Суммарное количество по партии готовой продукции #{output_id} больше доступного остатка "
+                            f"({stock.current_quantity:,.3f} {stock.unit_short_name})."
+                        )
                 
-                submitted = st.form_submit_button("Сохранить заказ")
+                submitted = st.button("Сохранить заказ", key=field_key("submit"))
                 if submitted:
-                    if not customer_name:
-                        st.error("Укажите имя клиента")
-                    elif not order_items:
-                        st.error("Добавьте хотя бы одну позицию")
+                    submit_errors = []
+                    if not customer_name.strip():
+                        submit_errors.append("Укажите имя клиента.")
+                    if not order_items and not validation_errors:
+                        submit_errors.append("Добавьте хотя бы одну позицию.")
+                    submit_errors.extend(validation_errors)
+
+                    if submit_errors:
+                        for error in submit_errors:
+                            st.error(error)
                     else:
                         try:
                             with SessionLocal() as db_write:
@@ -193,7 +281,8 @@ with tabs[1]:
                                     comment=order_comment
                                 )
                                 db_write.commit()
-                                st.success(f"Заказ для '{customer_name}' успешно сохранен!")
+                                st.session_state.order_form_version += 1
+                                st.session_state.order_saved_message = f"Заказ для '{customer_name.strip()}' успешно сохранен!"
                                 st.rerun()
                         except Exception as e:
                             st.error(f"Ошибка при сохранении: {e}")

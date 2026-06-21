@@ -125,5 +125,6 @@ def delete_finished_product_packing(session: Session, packing_id: int) -> None:
     finished_output = packing.finished_output
     session.delete(packing)
     session.flush()
-    session.delete(finished_output)
-    session.flush()
+    if finished_output is not None:
+        session.delete(finished_output)
+        session.flush()

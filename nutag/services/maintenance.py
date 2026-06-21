@@ -9,7 +9,9 @@ from nutag.db.models import (
     BatchIngredientUse,
     BatchPackagingUse,
     BatchPreparationUse,
+    FinishedProductBulkOutput,
     FinishedProductOutput,
+    FinishedProductPacking,
     Order,
     OrderItem,
     Preparation,
@@ -31,7 +33,9 @@ def reset_operational_data(session: Session) -> None:
     session.execute(delete(Order))
     
     # 2. Production related
+    session.execute(delete(FinishedProductPacking))
     session.execute(delete(FinishedProductOutput))
+    session.execute(delete(FinishedProductBulkOutput))
     session.execute(delete(BatchIngredientUse))
     session.execute(delete(BatchPreparationUse))
     session.execute(delete(BatchPackagingUse))
