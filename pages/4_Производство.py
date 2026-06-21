@@ -124,8 +124,12 @@ with tabs[1]:
             if b.item_type == ExtendedItemType.PREPARATION
         }
         all_ingredients = {i.id: i for i in db.query(Ingredient).all()}
+        ingredient_by_name = {i.name: i for i in db.query(Ingredient).order_by(Ingredient.name).all()}
+        available_ingredient_names = sorted({b.item_name for b in ing_batch_options.values()})
+        available_prep_names = sorted({b.item_name for b in prep_batch_options.values()})
         all_products = {p.name: p for p in db.query(Product).all()}
         all_units = {u.short_name: u for u in db.query(Unit).all()}
+        unit_names = list(all_units.keys())
         all_equipment = {e.name: e for e in db.query(Equipment).all()}
 
         current_labor_rate = db.query(LaborRate).filter(LaborRate.is_active.is_(True)).first()
@@ -173,28 +177,43 @@ with tabs[1]:
                 st.subheader("Ингредиенты (до 3)")
                 ing_uses = []
                 for i in range(3):
-                    ca, cb, cc, cd = st.columns([4, 1, 2, 2])
+                    ca, cb, cc, cd, ce = st.columns([3, 4, 1, 2, 2])
                     with ca:
-                        i_batch_label = st.selectbox(
-                            f"Выбор партии ингредиента {i}",
-                            options=[""] + list(ing_batch_options.keys()),
-                            key=f"bi_batch_{i}",
+                        ingredient_name = st.selectbox(
+                            f"Ингредиент {i}",
+                            options=[""] + available_ingredient_names,
+                            key=f"bi_item_{i}",
                         )
+                    selected_ingredient = ingredient_by_name.get(ingredient_name)
+                    filtered_ing_batch_options = {
+                        label: batch
+                        for label, batch in ing_batch_options.items()
+                        if selected_ingredient and batch.item_id == selected_ingredient.id
+                    }
 
-                    selected_i_batch = ing_batch_options.get(i_batch_label)
+                    with cb:
+                        i_batch_label = st.selectbox(
+                            f"Выбор партии {i}",
+                            options=[""] + list(filtered_ing_batch_options.keys()),
+                            key=f"bi_batch_{i}_{selected_ingredient.id if selected_ingredient else 'none'}",
+                        )
+                        if selected_ingredient and not filtered_ing_batch_options:
+                            st.caption("Нет доступных партий выбранного ингредиента")
+
+                    selected_i_batch = filtered_ing_batch_options.get(i_batch_label)
                     def_unit = selected_i_batch.unit_short_name if selected_i_batch else ""
                     def_price = float(selected_i_batch.unit_price) if selected_i_batch else 0.0
 
-                    with cb:
+                    with cc:
                         u_name = st.selectbox(
                             f"Ед и {i}",
-                            options=list(all_units.keys()),
-                            index=list(all_units.keys()).index(def_unit) if def_unit in all_units else 0,
-                            key=f"bi_unit_{i}",
+                            options=unit_names,
+                            index=unit_names.index(def_unit) if def_unit in all_units else 0,
+                            key=f"bi_unit_{i}_{selected_i_batch.batch_id if selected_i_batch else 'none'}",
                         )
-                    with cc:
-                        qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"bi_qty_{i}")
                     with cd:
+                        qty = st.number_input(f"Кол-во {i}", min_value=0.0, step=0.1, format="%.3f", key=f"bi_qty_{i}")
+                    with ce:
                         line_total = Decimal(str(qty)) * Decimal(str(def_price))
                         st.text_input(
                             f"Стоимость списания {i}",
@@ -218,28 +237,42 @@ with tabs[1]:
                 st.subheader("Заготовки (до 3)")
                 p_uses = []
                 for i in range(3):
-                    ca, cb, cc, cd = st.columns([4, 1, 2, 2])
+                    ca, cb, cc, cd, ce = st.columns([3, 4, 1, 2, 2])
                     with ca:
-                        p_batch_label = st.selectbox(
-                            f"Выбор заготовки {i}",
-                            options=[""] + list(prep_batch_options.keys()),
-                            key=f"bp_batch_{i}",
+                        prep_name = st.selectbox(
+                            f"Вид заготовки {i}",
+                            options=[""] + available_prep_names,
+                            key=f"bp_item_{i}",
                         )
+                    filtered_prep_batch_options = {
+                        label: batch
+                        for label, batch in prep_batch_options.items()
+                        if prep_name and batch.item_name == prep_name
+                    }
 
-                    selected_p_batch = prep_batch_options.get(p_batch_label)
+                    with cb:
+                        p_batch_label = st.selectbox(
+                            f"Выбор партии заготовки {i}",
+                            options=[""] + list(filtered_prep_batch_options.keys()),
+                            key=f"bp_batch_{i}_{prep_name or 'none'}",
+                        )
+                        if prep_name and not filtered_prep_batch_options:
+                            st.caption("Нет доступных партий выбранной заготовки")
+
+                    selected_p_batch = filtered_prep_batch_options.get(p_batch_label)
                     def_unit = selected_p_batch.unit_short_name if selected_p_batch else ""
                     def_price = float(selected_p_batch.unit_price) if selected_p_batch else 0.0
 
-                    with cb:
+                    with cc:
                         u_name = st.selectbox(
                             f"Ед з {i}",
-                            options=list(all_units.keys()),
-                            index=list(all_units.keys()).index(def_unit) if def_unit in all_units else 0,
-                            key=f"bp_unit_{i}",
+                            options=unit_names,
+                            index=unit_names.index(def_unit) if def_unit in all_units else 0,
+                            key=f"bp_unit_{i}_{selected_p_batch.batch_id if selected_p_batch else 'none'}",
                         )
-                    with cc:
-                        qty = st.number_input(f"Кол-во з {i}", min_value=0.0, step=0.1, format="%.3f", key=f"bp_qty_{i}")
                     with cd:
+                        qty = st.number_input(f"Кол-во з {i}", min_value=0.0, step=0.1, format="%.3f", key=f"bp_qty_{i}")
+                    with ce:
                         line_total = Decimal(str(qty)) * Decimal(str(def_price))
                         st.text_input(
                             f"Стоимость списания з {i}",
