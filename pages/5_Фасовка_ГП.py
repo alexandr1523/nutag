@@ -136,13 +136,21 @@ with tabs[0]:
             packaging_value = packaging_quantity * Decimal(str(selected_packaging_batch.unit_price))
             total_cost = bulk_value + packaging_value
             unit_cost = total_cost / total_quantity if total_quantity > 0 else Decimal("0")
+            package_unit_cost = total_cost / Decimal(package_count) if package_count > 0 else Decimal("0")
 
             st.subheader("Расчёт")
-            m1, m2, m3, m4 = st.columns(4)
+            m1, m2, m3 = st.columns(3)
             m1.metric("Итоговый выпуск", f"{total_quantity:,.3f} {selected_bulk.unit_short_name}")
-            m2.metric("Стоимость списываемого нефасованного остатка", format_money(bulk_value))
-            m3.metric("Стоимость упаковки", format_money(packaging_value))
-            m4.metric("Себестоимость за ед.", f"{unit_cost:,.4f}")
+            m2.metric("Количество фасовок", f"{package_count:,.0f}")
+            m3.metric("Общая себестоимость фасовки", format_money(total_cost))
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Стоимость списываемого нефасованного остатка", format_money(bulk_value))
+            c2.metric("Стоимость упаковки", format_money(packaging_value))
+            c3.metric("Себестоимость 1 фасовки", format_money(package_unit_cost))
+            st.caption(
+                f"Себестоимость базовой единицы для складских списаний: "
+                f"{unit_cost:,.4f} за 1 {selected_bulk.unit_short_name}."
+            )
 
             st.caption(
                 f"Будет списано упаковки: {packaging_quantity:,.0f} {selected_packaging_batch.unit_short_name}. "
@@ -254,8 +262,12 @@ with tabs[1]:
                         ),
                         "Упаковка": packing.packaging.name,
                         "Партия упаковки": f"#{packing.packaging_purchase_item_id}",
+                        "Общая себестоимость": f"{packing.total_cost:,.2f}",
                         "Стоимость упаковки": f"{packing.packaging_total_cost:,.2f}",
-                        "Себестоимость ед.": f"{packing.unit_cost:,.4f}",
+                        "Себестоимость 1 фасовки": (
+                            f"{packing.total_cost / Decimal(packing.finished_output.package_count):,.2f}"
+                        ),
+                        "Себестоимость базовой ед.": f"{packing.unit_cost:,.4f}",
                         "Комментарий": packing.comment or "",
                     }
                 )
