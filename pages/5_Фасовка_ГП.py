@@ -12,7 +12,11 @@ from nutag.db.init_db import initialize_database
 from nutag.db.models import FinishedProductPacking, Packaging, PurchaseItemType, Unit
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.inventory import list_available_bulk_finished_product_outputs, list_available_stock_batches
-from nutag.services.packing import pack_finished_product
+from nutag.services.packing import (
+    delete_finished_product_packing,
+    is_finished_product_packing_used,
+    pack_finished_product,
+)
 
 
 def format_money(value: Decimal | int | float | str) -> str:
@@ -217,6 +221,9 @@ with tabs[0]:
 
 with tabs[1]:
     st.header("История фасовки")
+    deleted_message = st.session_state.pop("packing_deleted_message", None)
+    if deleted_message:
+        st.success(deleted_message)
 
     with SessionLocal() as db:
         packings = (
@@ -254,3 +261,51 @@ with tabs[1]:
                 )
 
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+            st.subheader("Удаление ошибочной фасовки")
+            st.caption(
+                "Удалять можно только фасовку, фасованная партия которой ещё не использована в заказах. "
+                "После удаления нефасованный остаток и упаковка снова станут доступными."
+            )
+
+            for packing in packings:
+                is_used = is_finished_product_packing_used(db, packing.id)
+                title = (
+                    f"Фасовка #{packing.id}: {packing.finished_output.batch.product.name}, "
+                    f"{packing.finished_output.total_quantity:,.3f} "
+                    f"{packing.finished_output.package_unit.short_name}"
+                )
+                with st.expander(title):
+                    st.write(f"**Дата:** {packing.packed_on}")
+                    st.write(f"**Нефасованный остаток:** #{packing.source_bulk_output_id}")
+                    st.write(f"**Партия упаковки:** #{packing.packaging_purchase_item_id}")
+                    st.write(f"**Упаковка:** {packing.packaging.name}")
+                    st.write(f"**Комментарий:** {packing.comment or ''}")
+
+                    if is_used:
+                        st.warning("Эта фасовка уже использована в заказах, удаление недоступно.")
+                    else:
+                        st.warning(
+                            "Удаление отменит фасовку: созданная фасованная партия будет удалена, "
+                            "а нефасованный остаток и упаковка вернутся в доступные остатки."
+                        )
+                        with st.form(f"delete_packing_{packing.id}"):
+                            confirmation = st.text_input(
+                                "Для удаления введите УДАЛИТЬ",
+                                key=f"delete_packing_confirm_{packing.id}",
+                            )
+                            submitted_delete = st.form_submit_button("Удалить фасовку")
+                            if submitted_delete:
+                                if confirmation != "УДАЛИТЬ":
+                                    st.error("Введите УДАЛИТЬ для подтверждения удаления.")
+                                else:
+                                    try:
+                                        with SessionLocal() as db_write:
+                                            delete_finished_product_packing(db_write, packing.id)
+                                            db_write.commit()
+                                        st.session_state.packing_deleted_message = (
+                                            f"Фасовка #{packing.id} удалена."
+                                        )
+                                        st.rerun()
+                                    except Exception as exc:
+                                        st.error(f"Ошибка при удалении: {exc}")

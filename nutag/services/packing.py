@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from nutag.db.models import (
     FinishedProductOutput,
     FinishedProductPacking,
+    OrderItem,
     Packaging,
     PurchaseItemType,
     Unit,
@@ -95,3 +96,34 @@ def pack_finished_product(
     session.add(packing)
     session.flush()
     return packing
+
+
+def is_finished_product_packing_used(session: Session, packing_id: int) -> bool:
+    """Return whether a packing output is already referenced by an order."""
+
+    packing = session.get(FinishedProductPacking, packing_id)
+    if packing is None:
+        return False
+
+    return (
+        session.query(OrderItem.id)
+        .filter(OrderItem.batch_output_id == packing.finished_output_id)
+        .first()
+        is not None
+    )
+
+
+def delete_finished_product_packing(session: Session, packing_id: int) -> None:
+    """Delete an unused packing operation and its generated finished product output."""
+
+    packing = session.get(FinishedProductPacking, packing_id)
+    if packing is None:
+        raise ValueError("Фасовка не найдена")
+    if is_finished_product_packing_used(session, packing_id):
+        raise ValueError("Фасовка уже использована в заказах и не может быть удалена")
+
+    finished_output = packing.finished_output
+    session.delete(packing)
+    session.flush()
+    session.delete(finished_output)
+    session.flush()
