@@ -21,6 +21,8 @@
 - The plan must clearly separate: current implemented state, accepted product decisions, deprecated/rejected decisions, active backlog, next step, and change log.
 - Every backlog item should have an explicit status such as `done`, `in progress`, `partial`, `blocked`, `not started`, or `rejected`.
 - Keep exactly one clearly marked next step. When completing work, update that next step instead of only appending notes.
+- Before changing the next step, audit the current roadmap stage first. Do not move to a later stage while the current stage still has unresolved `current`, `next`, `approval required`, or blocking `not started` items unless the user explicitly defers them.
+- If moving to a later stage, document in `IMPLEMENTATION_PLAN.md` why remaining items in the current stage are `done`, `rejected`, `later`, `not in MVP`, or otherwise non-blocking.
 - When product direction changes, move obsolete rules to a deprecated/rejected section instead of leaving contradictory requirements in active sections.
 - Do not add new plan sections that duplicate existing roadmap categories; update the existing category unless a genuinely new category is needed.
 - When committing meaningful business-logic or architecture changes, update the plan status or change log if the change affects roadmap state.
