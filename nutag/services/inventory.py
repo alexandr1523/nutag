@@ -78,8 +78,12 @@ class FinishedProductStock:
     unit_short_name: str
     produced_on: date
     total_quantity: Decimal
+    physical_quantity: Decimal
+    reserved_quantity: Decimal
+    available_quantity: Decimal
     current_quantity: Decimal
     current_package_count: Decimal
+    available_package_count: Decimal
     unit_cost: Decimal
     output: object
 
@@ -204,7 +208,7 @@ def get_available_finished_product_output(
 ):
     """Return a selected finished output and validate it can cover an order outflow."""
 
-    from nutag.db.models import FinishedProductOutput, OrderItem
+    from nutag.db.models import FinishedProductOutput, Order, OrderItem, OrderStatus, ReservationStatus
     from sqlalchemy import func
 
     quantity_decimal = to_decimal(quantity)
@@ -220,11 +224,20 @@ def get_available_finished_product_output(
     if output.package_unit.short_name != expected_unit_short_name:
         raise ValueError("Единица упаковки выбранной партии готовой продукции не соответствует заказу")
 
-    used_quantity = session.query(func.coalesce(func.sum(OrderItem.total_quantity), 0))\
+    delivered_quantity = session.query(func.coalesce(func.sum(OrderItem.total_quantity), 0))\
+        .join(Order, Order.id == OrderItem.order_id)\
         .filter(OrderItem.batch_output_id == batch_output_id)\
+        .filter(Order.order_status == OrderStatus.DELIVERED)\
         .scalar()
-    remaining_quantity = output.total_quantity - Decimal(str(used_quantity))
-    if remaining_quantity < quantity_decimal:
+    physical_quantity = output.total_quantity - Decimal(str(delivered_quantity))
+    reserved_quantity = session.query(func.coalesce(func.sum(OrderItem.total_quantity), 0))\
+        .join(Order, Order.id == OrderItem.order_id)\
+        .filter(OrderItem.batch_output_id == batch_output_id)\
+        .filter(Order.order_status.notin_([OrderStatus.DELIVERED, OrderStatus.CANCELLED]))\
+        .filter(Order.reservation_status.in_([ReservationStatus.RESERVED, ReservationStatus.PARTIAL]))\
+        .scalar()
+    available_quantity = physical_quantity - Decimal(str(reserved_quantity))
+    if available_quantity < quantity_decimal:
         raise ValueError("Недостаточно остатка в выбранной партии готовой продукции")
 
     return output
@@ -233,16 +246,29 @@ def get_available_finished_product_output(
 def list_available_finished_product_outputs(session: Session) -> list[FinishedProductStock]:
     """List finished product outputs with positive remaining quantity."""
 
-    from nutag.db.models import FinishedProductOutput, OrderItem
+    from nutag.db.models import FinishedProductOutput, Order, OrderItem, OrderStatus, ReservationStatus
     from sqlalchemy import func
 
-    used_rows = session.query(OrderItem.batch_output_id, func.sum(OrderItem.total_quantity))\
+    delivered_rows = session.query(OrderItem.batch_output_id, func.sum(OrderItem.total_quantity))\
+        .join(Order, Order.id == OrderItem.order_id)\
         .filter(OrderItem.batch_output_id.isnot(None))\
+        .filter(Order.order_status == OrderStatus.DELIVERED)\
         .group_by(OrderItem.batch_output_id)\
         .all()
-    used_by_output_id = {
+    delivered_by_output_id = {
         output_id: Decimal(str(quantity))
-        for output_id, quantity in used_rows
+        for output_id, quantity in delivered_rows
+    }
+    reserved_rows = session.query(OrderItem.batch_output_id, func.sum(OrderItem.total_quantity))\
+        .join(Order, Order.id == OrderItem.order_id)\
+        .filter(OrderItem.batch_output_id.isnot(None))\
+        .filter(Order.order_status.notin_([OrderStatus.DELIVERED, OrderStatus.CANCELLED]))\
+        .filter(Order.reservation_status.in_([ReservationStatus.RESERVED, ReservationStatus.PARTIAL]))\
+        .group_by(OrderItem.batch_output_id)\
+        .all()
+    reserved_by_output_id = {
+        output_id: Decimal(str(quantity))
+        for output_id, quantity in reserved_rows
     }
 
     stocks: list[FinishedProductStock] = []
@@ -252,9 +278,11 @@ def list_available_finished_product_outputs(session: Session) -> list[FinishedPr
             continue
         if output.package_size <= 0:
             continue
-        used_quantity = used_by_output_id.get(output.id, Decimal("0"))
-        current_quantity = output.total_quantity - used_quantity
-        if current_quantity <= 0:
+        delivered_quantity = delivered_by_output_id.get(output.id, Decimal("0"))
+        physical_quantity = output.total_quantity - delivered_quantity
+        reserved_quantity = reserved_by_output_id.get(output.id, Decimal("0"))
+        available_quantity = physical_quantity - reserved_quantity
+        if available_quantity <= 0:
             continue
         unit_cost = output.packing_operation.unit_cost if output.packing_operation else output.batch.unit_cost
 
@@ -267,8 +295,12 @@ def list_available_finished_product_outputs(session: Session) -> list[FinishedPr
                 unit_short_name=output.package_unit.short_name,
                 produced_on=output.batch.produced_on,
                 total_quantity=output.total_quantity,
-                current_quantity=current_quantity,
-                current_package_count=current_quantity / output.package_size,
+                physical_quantity=physical_quantity,
+                reserved_quantity=reserved_quantity,
+                available_quantity=available_quantity,
+                current_quantity=available_quantity,
+                current_package_count=available_quantity / output.package_size,
+                available_package_count=available_quantity / output.package_size,
                 unit_cost=unit_cost,
                 output=output,
             )

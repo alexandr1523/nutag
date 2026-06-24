@@ -98,7 +98,8 @@ with tabs[1]:
             (
                 f"{stock.product_name} | партия #{stock.output.batch_id}, выход #{stock.output_id} | "
                 f"{stock.package_size} {stock.unit_short_name} | "
-                f"остаток {stock.current_package_count:,.0f} уп. / {stock.current_quantity:,.3f} {stock.unit_short_name} | "
+                f"доступно {stock.available_package_count:,.0f} уп. / {stock.available_quantity:,.3f} {stock.unit_short_name} | "
+                f"факт {stock.physical_quantity:,.3f}, резерв {stock.reserved_quantity:,.3f} | "
                 f"себестоимость {stock.unit_cost:,.4f}"
             ): stock
             for stock in available_outputs
@@ -124,7 +125,13 @@ with tabs[1]:
                 with c5:
                     p_status = st.selectbox("Статус оплаты", options=[s.value for s in PaymentStatus], key=field_key("payment_status"))
                 with c6:
-                    r_status = st.selectbox("Статус резерва", options=[s.value for s in ReservationStatus], key=field_key("reservation_status"))
+                    reservation_options = [s.value for s in ReservationStatus]
+                    r_status = st.selectbox(
+                        "Статус резерва",
+                        options=reservation_options,
+                        index=reservation_options.index(ReservationStatus.RESERVED.value),
+                        key=field_key("reservation_status"),
+                    )
                 
                 delivery_cost = st.number_input(
                     "Стоимость доставки",
@@ -173,6 +180,11 @@ with tabs[1]:
                             package_cost = (
                                 Decimal(str(selected_stock.package_size))
                                 * Decimal(str(selected_stock.unit_cost))
+                            )
+                            st.caption(
+                                f"Доступно: {selected_stock.available_quantity:,.3f}; "
+                                f"резерв: {selected_stock.reserved_quantity:,.3f}; "
+                                f"факт: {selected_stock.physical_quantity:,.3f}"
                             )
                             st.caption(f"Себестоимость: {package_cost:,.2f}")
                         else:
@@ -234,12 +246,12 @@ with tabs[1]:
                     )
 
                 for output_id, requested_quantity in requested_output_quantities.items():
-                    available_quantity = Decimal(str(outputs_by_id[output_id].current_quantity))
+                    available_quantity = Decimal(str(outputs_by_id[output_id].available_quantity))
                     if requested_quantity > available_quantity:
                         stock = outputs_by_id[output_id]
                         validation_errors.append(
-                            f"Суммарное количество по партии готовой продукции #{output_id} больше доступного остатка "
-                            f"({stock.current_quantity:,.3f} {stock.unit_short_name})."
+                            f"Суммарное количество по партии готовой продукции #{output_id} больше доступно к продаже "
+                            f"({stock.available_quantity:,.3f} {stock.unit_short_name})."
                         )
                 
                 submitted = st.button("Сохранить заказ", key=field_key("submit"))

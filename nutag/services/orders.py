@@ -55,7 +55,7 @@ def create_order(
     delivery_cost: Decimal | int | float | str = 0,
     order_status: OrderStatus = OrderStatus.NEW,
     payment_status: PaymentStatus = PaymentStatus.PENDING,
-    reservation_status: ReservationStatus = ReservationStatus.NOT_RESERVED,
+    reservation_status: ReservationStatus = ReservationStatus.RESERVED,
     comment: str | None = None,
 ) -> Order:
     """Create a customer order with items and calculate total amount."""

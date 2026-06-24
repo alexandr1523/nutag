@@ -111,6 +111,7 @@ def test_create_order():
         assert saved_order.items[0].total_quantity == Decimal("1.000") # 2 * 0.5
         assert saved_order.order_status == OrderStatus.NEW
         assert saved_order.payment_status == PaymentStatus.PENDING
+        assert saved_order.reservation_status == ReservationStatus.RESERVED
 
 
 def test_list_orders():
@@ -185,6 +186,9 @@ def test_create_order_persists_selected_finished_output() -> None:
         available_outputs = list_available_finished_product_outputs(session)
         assert len(available_outputs) == 1
         assert available_outputs[0].output_id == output_id
+        assert available_outputs[0].physical_quantity == Decimal("2.000")
+        assert available_outputs[0].reserved_quantity == Decimal("1.000")
+        assert available_outputs[0].available_quantity == Decimal("1.000")
         assert available_outputs[0].current_quantity == Decimal("1.000")
 
 
@@ -316,6 +320,88 @@ def test_create_order_rejects_selected_finished_output_overdraft() -> None:
                     )
                 ],
             )
+
+
+def test_delivered_order_reduces_physical_finished_output_quantity() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        unit_kg = Unit(name="Kilogram", short_name="kg")
+        session.add(unit_kg)
+        product = Product(name="Пельмени")
+        session.add(product)
+        session.flush()
+        output = create_packed_output(session, product=product, unit_kg=unit_kg, quantity="2")
+
+        create_order(
+            session,
+            order_date=date(2026, 6, 15),
+            customer_name="Клиент",
+            items=[
+                OrderItemInput(
+                    product=product,
+                    package_size="0.5",
+                    package_unit=unit_kg,
+                    package_count=2,
+                    unit_price="450",
+                    batch_output=output,
+                )
+            ],
+            order_status=OrderStatus.DELIVERED,
+            reservation_status=ReservationStatus.RESERVED,
+        )
+        session.commit()
+        output_id = output.id
+
+    with session_factory() as session:
+        available_outputs = list_available_finished_product_outputs(session)
+
+    assert len(available_outputs) == 1
+    assert available_outputs[0].output_id == output_id
+    assert available_outputs[0].physical_quantity == Decimal("1.000")
+    assert available_outputs[0].reserved_quantity == Decimal("0")
+    assert available_outputs[0].available_quantity == Decimal("1.000")
+
+
+def test_cancelled_order_does_not_reserve_finished_output() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        unit_kg = Unit(name="Kilogram", short_name="kg")
+        session.add(unit_kg)
+        product = Product(name="Пельмени")
+        session.add(product)
+        session.flush()
+        output = create_packed_output(session, product=product, unit_kg=unit_kg, quantity="2")
+
+        create_order(
+            session,
+            order_date=date(2026, 6, 15),
+            customer_name="Клиент",
+            items=[
+                OrderItemInput(
+                    product=product,
+                    package_size="0.5",
+                    package_unit=unit_kg,
+                    package_count=2,
+                    unit_price="450",
+                    batch_output=output,
+                )
+            ],
+            order_status=OrderStatus.CANCELLED,
+            reservation_status=ReservationStatus.RESERVED,
+        )
+        session.commit()
+        output_id = output.id
+
+    with session_factory() as session:
+        available_outputs = list_available_finished_product_outputs(session)
+
+    assert len(available_outputs) == 1
+    assert available_outputs[0].output_id == output_id
+    assert available_outputs[0].physical_quantity == Decimal("2.000")
+    assert available_outputs[0].reserved_quantity == Decimal("0")
+    assert available_outputs[0].available_quantity == Decimal("2.000")
 
 
 def test_create_order_rejects_selected_finished_output_wrong_product() -> None:
