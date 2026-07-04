@@ -205,6 +205,7 @@ def get_available_finished_product_output(
     expected_package_size: Decimal | int | float | str,
     expected_unit_short_name: str,
     quantity: Decimal | int | float | str,
+    exclude_order_id: int | None = None,
 ):
     """Return a selected finished output and validate it can cover an order outflow."""
 
@@ -227,15 +228,19 @@ def get_available_finished_product_output(
     delivered_quantity = session.query(func.coalesce(func.sum(OrderItem.total_quantity), 0))\
         .join(Order, Order.id == OrderItem.order_id)\
         .filter(OrderItem.batch_output_id == batch_output_id)\
-        .filter(Order.order_status == OrderStatus.DELIVERED)\
-        .scalar()
+        .filter(Order.order_status == OrderStatus.DELIVERED)
+    if exclude_order_id is not None:
+        delivered_quantity = delivered_quantity.filter(Order.id != exclude_order_id)
+    delivered_quantity = delivered_quantity.scalar()
     physical_quantity = output.total_quantity - Decimal(str(delivered_quantity))
     reserved_quantity = session.query(func.coalesce(func.sum(OrderItem.total_quantity), 0))\
         .join(Order, Order.id == OrderItem.order_id)\
         .filter(OrderItem.batch_output_id == batch_output_id)\
         .filter(Order.order_status.notin_([OrderStatus.DELIVERED, OrderStatus.CANCELLED]))\
-        .filter(Order.reservation_status.in_([ReservationStatus.RESERVED, ReservationStatus.PARTIAL]))\
-        .scalar()
+        .filter(Order.reservation_status.in_([ReservationStatus.RESERVED, ReservationStatus.PARTIAL]))
+    if exclude_order_id is not None:
+        reserved_quantity = reserved_quantity.filter(Order.id != exclude_order_id)
+    reserved_quantity = reserved_quantity.scalar()
     available_quantity = physical_quantity - Decimal(str(reserved_quantity))
     if available_quantity < quantity_decimal:
         raise ValueError("Недостаточно остатка в выбранной партии готовой продукции")

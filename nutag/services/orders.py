@@ -45,28 +45,12 @@ def calculate_order_item_total(
     return Decimal(count) * price
 
 
-def create_order(
+def _build_order_items(
     session: Session,
+    item_inputs: list[OrderItemInput],
     *,
-    order_date: date,
-    customer_name: str,
-    items: Iterable[OrderItemInput],
-    customer_contact: str | None = None,
-    delivery_cost: Decimal | int | float | str = 0,
-    order_status: OrderStatus = OrderStatus.NEW,
-    payment_status: PaymentStatus = PaymentStatus.PENDING,
-    reservation_status: ReservationStatus = ReservationStatus.RESERVED,
-    comment: str | None = None,
-) -> Order:
-    """Create a customer order with items and calculate total amount."""
-
-    if not customer_name.strip():
-        raise ValueError("Укажите имя клиента")
-
-    item_inputs = list(items)
-    if not item_inputs:
-        raise ValueError("Order must contain at least one item")
-
+    exclude_order_id: int | None = None,
+) -> tuple[list[OrderItem], Decimal]:
     total_amount = Decimal("0")
     order_items = []
     reserved_output_quantities: dict[int, Decimal] = {}
@@ -96,8 +80,9 @@ def create_order(
             expected_package_size=line.package_size,
             expected_unit_short_name=line.package_unit.short_name,
             quantity=reserved_output_quantities[line.batch_output.id],
+            exclude_order_id=exclude_order_id,
         )
-        
+
         order_items.append(
             OrderItem(
                 product=line.product,
@@ -111,6 +96,33 @@ def create_order(
                 comment=line.comment,
             )
         )
+
+    return order_items, total_amount
+
+
+def create_order(
+    session: Session,
+    *,
+    order_date: date,
+    customer_name: str,
+    items: Iterable[OrderItemInput],
+    customer_contact: str | None = None,
+    delivery_cost: Decimal | int | float | str = 0,
+    order_status: OrderStatus = OrderStatus.NEW,
+    payment_status: PaymentStatus = PaymentStatus.PENDING,
+    reservation_status: ReservationStatus = ReservationStatus.RESERVED,
+    comment: str | None = None,
+) -> Order:
+    """Create a customer order with items and calculate total amount."""
+
+    if not customer_name.strip():
+        raise ValueError("Укажите имя клиента")
+
+    item_inputs = list(items)
+    if not item_inputs:
+        raise ValueError("Order must contain at least one item")
+
+    order_items, total_amount = _build_order_items(session, item_inputs)
 
     order = Order(
         order_date=order_date,
@@ -128,6 +140,58 @@ def create_order(
     session.add(order)
     session.flush()
     return order
+
+
+def update_order(
+    session: Session,
+    order_id: int,
+    *,
+    order_date: date,
+    customer_name: str,
+    items: Iterable[OrderItemInput],
+    customer_contact: str | None = None,
+    delivery_cost: Decimal | int | float | str = 0,
+    order_status: OrderStatus = OrderStatus.NEW,
+    payment_status: PaymentStatus = PaymentStatus.PENDING,
+    reservation_status: ReservationStatus = ReservationStatus.RESERVED,
+    comment: str | None = None,
+) -> Order:
+    """Update an existing customer order and recalculate totals."""
+
+    order = session.get(Order, order_id)
+    if order is None:
+        raise ValueError("Заказ не найден")
+    if not customer_name.strip():
+        raise ValueError("Укажите имя клиента")
+
+    item_inputs = list(items)
+    if not item_inputs:
+        raise ValueError("Order must contain at least one item")
+
+    order_items, total_amount = _build_order_items(session, item_inputs, exclude_order_id=order_id)
+
+    order.order_date = order_date
+    order.customer_name = customer_name.strip()
+    order.customer_contact = customer_contact
+    order.order_status = order_status
+    order.payment_status = payment_status
+    order.reservation_status = reservation_status
+    order.delivery_cost = to_decimal(delivery_cost)
+    order.comment = comment
+    order.total_amount = total_amount
+    order.items = order_items
+    session.flush()
+    return order
+
+
+def delete_order(session: Session, order_id: int) -> None:
+    """Delete an order and release its derived reservation/stock impact."""
+
+    order = session.get(Order, order_id)
+    if order is None:
+        raise ValueError("Заказ не найден")
+    session.delete(order)
+    session.flush()
 
 
 def list_orders(session: Session) -> list[Order]:

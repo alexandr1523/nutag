@@ -5,12 +5,11 @@ from __future__ import annotations
 import streamlit as st
 from decimal import Decimal
 from datetime import date
-from sqlalchemy.orm import Session
 from nutag.db.init_db import initialize_database
 from nutag.db.models import Product, Unit, OrderStatus, PaymentStatus, ReservationStatus
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.inventory import list_available_finished_product_outputs
-from nutag.services.orders import create_order, list_orders, OrderItemInput
+from nutag.services.orders import create_order, delete_order, list_orders, OrderItemInput, update_order
 
 
 st.set_page_config(page_title="Заказы | Nutag", page_icon="🛍️", layout="wide")
@@ -23,6 +22,12 @@ initialize_database(engine)
 SessionLocal = create_session_factory(engine)
 
 tabs = st.tabs(["Список заказов", "Новый заказ"])
+
+
+def enum_index(enum_cls, value) -> int:
+    options = [item.value for item in enum_cls]
+    current_value = value.value if hasattr(value, "value") else str(value)
+    return options.index(current_value) if current_value in options else 0
 
 # --- List Orders Tab ---
 with tabs[0]:
@@ -72,6 +77,181 @@ with tabs[0]:
                             "Партия": batch_label or "Не выбрана",
                         })
                     st.table(items_data)
+
+                    st.subheader("Редактирование заказа")
+                    st.caption(
+                        "В MVP можно изменить реквизиты, статусы, количество и продажную цену существующих строк. "
+                        "Смена партии и добавление новых строк будут отдельной доработкой."
+                    )
+                    with st.form(f"edit_order_{o.id}"):
+                        e_col1, e_col2, e_col3 = st.columns(3)
+                        with e_col1:
+                            edit_order_date = st.date_input(
+                                "Дата заказа",
+                                value=o.order_date,
+                                key=f"edit_order_date_{o.id}",
+                            )
+                        with e_col2:
+                            edit_customer_name = st.text_input(
+                                "Имя клиента",
+                                value=o.customer_name,
+                                key=f"edit_customer_name_{o.id}",
+                            )
+                        with e_col3:
+                            edit_customer_contact = st.text_input(
+                                "Контакт",
+                                value=o.customer_contact or "",
+                                key=f"edit_customer_contact_{o.id}",
+                            )
+
+                        s_col1, s_col2, s_col3 = st.columns(3)
+                        with s_col1:
+                            edit_order_status = st.selectbox(
+                                "Статус заказа",
+                                options=[s.value for s in OrderStatus],
+                                index=enum_index(OrderStatus, o.order_status),
+                                key=f"edit_order_status_{o.id}",
+                            )
+                        with s_col2:
+                            edit_payment_status = st.selectbox(
+                                "Статус оплаты",
+                                options=[s.value for s in PaymentStatus],
+                                index=enum_index(PaymentStatus, o.payment_status),
+                                key=f"edit_payment_status_{o.id}",
+                            )
+                        with s_col3:
+                            edit_reservation_status = st.selectbox(
+                                "Статус резерва",
+                                options=[s.value for s in ReservationStatus],
+                                index=enum_index(ReservationStatus, o.reservation_status),
+                                key=f"edit_reservation_status_{o.id}",
+                            )
+
+                        edit_delivery_cost = st.number_input(
+                            "Стоимость доставки",
+                            min_value=0.0,
+                            value=float(o.delivery_cost),
+                            step=10.0,
+                            format="%.2f",
+                            key=f"edit_delivery_cost_{o.id}",
+                        )
+                        edit_comment = st.text_area(
+                            "Комментарий",
+                            value=o.comment or "",
+                            key=f"edit_comment_{o.id}",
+                        )
+
+                        edited_lines = []
+                        st.markdown("**Строки заказа**")
+                        for idx, item in enumerate(o.items):
+                            l_col1, l_col2, l_col3, l_col4 = st.columns([3, 3, 2, 2])
+                            with l_col1:
+                                st.write(item.product.name)
+                                st.caption(
+                                    f"{item.package_size:,.3f} {item.package_unit.short_name}"
+                                )
+                            with l_col2:
+                                if item.batch_output:
+                                    st.write(
+                                        f"Партия #{item.batch_output.batch_id}, выход #{item.batch_output_id}"
+                                    )
+                                else:
+                                    st.write("Партия не выбрана")
+                            with l_col3:
+                                edited_count = st.number_input(
+                                    f"Кол-во фасовок {idx + 1}",
+                                    min_value=1,
+                                    value=int(item.package_count),
+                                    step=1,
+                                    key=f"edit_order_{o.id}_count_{item.id}",
+                                )
+                            with l_col4:
+                                edited_price = st.number_input(
+                                    f"Цена продажи за 1 фасовку {idx + 1}",
+                                    min_value=0.0,
+                                    value=float(item.unit_price),
+                                    step=50.0,
+                                    format="%.2f",
+                                    key=f"edit_order_{o.id}_price_{item.id}",
+                                )
+                            edited_lines.append(
+                                {
+                                    "item_id": item.id,
+                                    "count": edited_count,
+                                    "price": Decimal(str(edited_price)),
+                                }
+                            )
+
+                        submitted_edit = st.form_submit_button("Сохранить изменения")
+                        if submitted_edit:
+                            try:
+                                with SessionLocal() as db_write:
+                                    order_for_items = next(
+                                        order for order in orders if order.id == o.id
+                                    )
+                                    db_items = []
+                                    for edited_line in edited_lines:
+                                        source_item = next(
+                                            item
+                                            for item in order_for_items.items
+                                            if item.id == edited_line["item_id"]
+                                        )
+                                        db_items.append(
+                                            OrderItemInput(
+                                                product=db_write.merge(source_item.product),
+                                                package_size=source_item.package_size,
+                                                package_unit=db_write.merge(source_item.package_unit),
+                                                package_count=edited_line["count"],
+                                                unit_price=edited_line["price"],
+                                                batch_output=(
+                                                    db_write.merge(source_item.batch_output)
+                                                    if source_item.batch_output
+                                                    else None
+                                                ),
+                                                comment=source_item.comment,
+                                            )
+                                        )
+                                    update_order(
+                                        db_write,
+                                        o.id,
+                                        order_date=edit_order_date,
+                                        customer_name=edit_customer_name,
+                                        customer_contact=edit_customer_contact,
+                                        items=db_items,
+                                        delivery_cost=Decimal(str(edit_delivery_cost)),
+                                        order_status=OrderStatus(edit_order_status),
+                                        payment_status=PaymentStatus(edit_payment_status),
+                                        reservation_status=ReservationStatus(edit_reservation_status),
+                                        comment=edit_comment,
+                                    )
+                                    db_write.commit()
+                                st.success("Заказ обновлён.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Ошибка при обновлении заказа: {e}")
+
+                    st.subheader("Удаление заказа")
+                    st.warning(
+                        "Удаление уберёт заказ и освободит связанный резерв/списание в расчётах остатков."
+                    )
+                    with st.form(f"delete_order_{o.id}"):
+                        confirmation = st.text_input(
+                            "Для удаления введите УДАЛИТЬ",
+                            key=f"delete_order_confirm_{o.id}",
+                        )
+                        submitted_delete = st.form_submit_button("Удалить заказ")
+                        if submitted_delete:
+                            if confirmation != "УДАЛИТЬ":
+                                st.error("Введите УДАЛИТЬ для подтверждения удаления.")
+                            else:
+                                try:
+                                    with SessionLocal() as db_write:
+                                        delete_order(db_write, o.id)
+                                        db_write.commit()
+                                    st.success("Заказ удалён.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Ошибка при удалении заказа: {e}")
         else:
             st.info("Заказов пока нет")
 
@@ -198,7 +378,7 @@ with tabs[1]:
                         )
                     with ce:
                         p_price = st.number_input(
-                            f"Цена за фасовку {i + 1}",
+                            f"Цена продажи за 1 фасовку {i + 1}",
                             min_value=0.0,
                             step=50.0,
                             format="%.2f",
