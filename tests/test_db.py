@@ -1,9 +1,9 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, text
 
-from nutag.db import create_database, create_engine_for_url, create_session_factory
+from nutag.db import create_database, create_engine_for_url, create_session_factory, initialize_database
 from nutag.db.models import Ingredient, Packaging, Product, Purchase, PurchaseItem, PurchaseItemType, Unit
 
 
@@ -28,6 +28,84 @@ def test_create_database_creates_initial_tables() -> None:
         "batch_preparation_uses",
         "finished_product_outputs",
     }.issubset(table_names)
+
+
+def test_initialize_database_upgrades_legacy_sqlite_without_alembic(tmp_path) -> None:
+    db_path = tmp_path / "legacy.sqlite3"
+    engine = create_engine_for_url(f"sqlite:///{db_path}")
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE units (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    name VARCHAR(64) NOT NULL UNIQUE,
+                    short_name VARCHAR(16) NOT NULL UNIQUE,
+                    comment TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE purchase_items (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    purchase_id INTEGER NOT NULL,
+                    line_number INTEGER NOT NULL,
+                    item_type VARCHAR(32) NOT NULL,
+                    ingredient_id INTEGER,
+                    packaging_id INTEGER,
+                    item_name VARCHAR(128) NOT NULL,
+                    unit_id INTEGER NOT NULL,
+                    quantity NUMERIC(12, 3) NOT NULL,
+                    unit_price NUMERIC(12, 2) NOT NULL,
+                    total_price NUMERIC(12, 2) NOT NULL,
+                    expires_on DATE,
+                    comment TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE production_batches (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    produced_on DATE NOT NULL,
+                    product_id INTEGER NOT NULL,
+                    actual_output_quantity NUMERIC(12, 3) NOT NULL,
+                    output_unit_id INTEGER NOT NULL,
+                    labor_cost NUMERIC(12, 2) NOT NULL,
+                    allocated_overhead NUMERIC(12, 2) NOT NULL,
+                    total_cost NUMERIC(12, 2) NOT NULL,
+                    unit_cost NUMERIC(12, 4) NOT NULL,
+                    status VARCHAR(32) NOT NULL,
+                    comment TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+
+    initialize_database(engine)
+
+    inspector = inspect(engine)
+    assert "alembic_version" in inspector.get_table_names()
+    assert "consumables" in inspector.get_table_names()
+    assert "orders" in inspector.get_table_names()
+
+    purchase_item_columns = {column["name"] for column in inspector.get_columns("purchase_items")}
+    assert "consumable_id" in purchase_item_columns
+
+    production_batch_columns = {column["name"] for column in inspector.get_columns("production_batches")}
+    assert {"planned_quantity", "waste_quantity", "equipment_depreciation"}.issubset(production_batch_columns)
 
 
 def test_purchase_with_items_can_be_persisted() -> None:
