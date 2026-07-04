@@ -55,6 +55,27 @@ def test_reference_services_create_and_list_records() -> None:
         assert [packaging.name for packaging in list_packaging(session)] == ["Контейнер 1 кг"]
 
 
+def test_create_unit_normalizes_values_and_rejects_duplicates() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name=" Килограмм ", short_name=" Кг ", comment=" основной ")
+        session.commit()
+
+        assert kg.name == "Килограмм"
+        assert kg.short_name == "Кг"
+        assert kg.comment == "основной"
+
+        with pytest.raises(ValueError, match="таким сокращением"):
+            create_unit(session, name="Килограмм новый", short_name="кг")
+
+        with pytest.raises(ValueError, match="таким названием"):
+            create_unit(session, name="килограмм", short_name="kg")
+
+        with pytest.raises(ValueError, match="Название обязательно"):
+            create_unit(session, name="   ", short_name="шт")
+
+
 def test_calculate_purchase_line_total_validates_quantity_and_price() -> None:
     assert calculate_purchase_line_total(quantity="2.5", unit_price="80") == Decimal("200.0")
 

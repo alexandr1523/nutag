@@ -18,6 +18,7 @@ from nutag.db.models import (
 )
 from nutag.db.session import create_engine_for_url, create_session_factory
 from nutag.services.maintenance import reset_operational_data
+from nutag.services.references import create_unit
 
 
 st.set_page_config(page_title="Справочники | Nutag", page_icon="📖", layout="wide")
@@ -57,18 +58,23 @@ with tabs[0]:
         submitted = st.form_submit_button("Добавить")
 
         if submitted:
-            if not name or not short_name:
+            if not name.strip() or not short_name.strip():
                 st.error("Название и сокращение обязательны")
             else:
                 with SessionLocal() as db:
-                    new_unit = Unit(name=name, short_name=short_name, comment=comment)
-                    db.add(new_unit)
                     try:
+                        new_unit = create_unit(db, name=name, short_name=short_name, comment=comment)
                         db.commit()
-                        st.success(f"Единица '{name}' добавлена")
-                    except Exception as e:
+                        st.success(f"Единица '{new_unit.name}' добавлена")
+                    except ValueError as e:
                         db.rollback()
-                        st.error(f"Ошибка при добавлении: {e}")
+                        st.error(str(e))
+                    except Exception:
+                        db.rollback()
+                        st.error(
+                            "Не удалось добавить единицу измерения. "
+                            "Проверьте, что название и сокращение не дублируются."
+                        )
 
     st.subheader("Список единиц")
     with SessionLocal() as db:
