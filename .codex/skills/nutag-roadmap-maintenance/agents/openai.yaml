@@ -1,4 +1,4 @@
 interface:
   display_name: "Nutag Roadmap"
-  short_description: "Maintain Nutag implementation roadmap"
-  default_prompt: "Use $nutag-roadmap-maintenance to update Nutag's implementation plan after a change."
+  short_description: "Maintain Nutag roadmap and queue"
+  default_prompt: "Use $nutag-roadmap-maintenance to update Nutag's implementation plan, execution queue, and next step."
