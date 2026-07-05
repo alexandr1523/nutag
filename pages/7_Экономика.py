@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import streamlit as st
-from sqlalchemy import func
 import pandas as pd
 
 from nutag.db.init_db import initialize_database
-from nutag.db.models import ProductionBatch
 from nutag.db.session import create_engine_for_url, create_session_factory
-from nutag.services.economics import list_finished_product_cost_reports
-from nutag.services.orders import list_orders
+from nutag.services.economics import list_finished_product_cost_reports, list_order_margin_reports
 
 
 st.set_page_config(page_title="Экономика | Nutag", page_icon="📊", layout="wide")
@@ -70,64 +67,86 @@ with SessionLocal() as db:
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     with tabs[1]:
-        orders = list_orders(db)
-        if not orders:
+        st.subheader("Fast-track валовая маржа заказов")
+        st.caption(
+            "Расчёт использует продажную цену заказа и себестоимость выбранной фасованной партии ГП. "
+            "Амортизация, расходные материалы и постоянные расходы пока не включены."
+        )
+        reports = list_order_margin_reports(db)
+        if not reports:
             st.info("Нет данных для анализа. Создайте хотя бы один заказ.")
         else:
-        # Simple aggregation for MVP
-            total_revenue = sum(o.total_amount for o in orders)
-            total_delivery = sum(o.delivery_cost for o in orders)
-        
-        # Calculate COGS (simplified: sum of COGS for each order item)
-        # For each order item, we try to find the unit cost from the linked batch
-        # or from the latest batch of that product.
-            total_cogs = 0
-            for o in orders:
-                for item in o.items:
-                    unit_cost = 0
-                    if item.batch_output and item.batch_output.packing_operation:
-                        unit_cost = item.batch_output.packing_operation.unit_cost
-                    elif item.batch_output:
-                        unit_cost = item.batch_output.batch.unit_cost
-                    else:
-                    # Fallback to average unit cost for this product
-                        avg_cost = db.query(func.avg(ProductionBatch.unit_cost)).filter(ProductionBatch.product_id == item.product_id).scalar()
-                        unit_cost = avg_cost or 0
-                
-                    total_cogs += item.total_quantity * unit_cost
+            total_revenue = sum(report.revenue for report in reports)
+            total_direct_cost = sum(report.direct_cost for report in reports)
+            total_delivery = sum(report.delivery_cost for report in reports)
+            total_margin = sum(report.gross_margin for report in reports)
+            margin_percent = total_margin / total_revenue * 100 if total_revenue > 0 else None
 
-            margin = total_revenue - total_cogs - total_delivery
-        
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Выручка", f"{total_revenue:,.2f}")
-            col2.metric("Себестоимость (COGS)", f"{total_cogs:,.2f}")
+            col2.metric("Прямая себестоимость", f"{total_direct_cost:,.2f}")
             col3.metric("Доставка", f"{total_delivery:,.2f}")
-            col4.metric("Маржа", f"{margin:,.2f}", delta=f"{(margin/total_revenue*100):.1f}%" if total_revenue > 0 else None)
+            col4.metric(
+                "Валовая маржа",
+                f"{total_margin:,.2f}",
+                delta=f"{margin_percent:.1f}%" if margin_percent is not None else None,
+            )
 
             st.divider()
-        
-            st.subheader("Детальный отчет по заказам")
-            report_data = []
-            for o in orders:
-                order_cogs = 0
-                for item in o.items:
-                    if item.batch_output and item.batch_output.packing_operation:
-                        unit_cost = item.batch_output.packing_operation.unit_cost
-                    elif item.batch_output:
-                        unit_cost = item.batch_output.batch.unit_cost
-                    else:
-                        avg_cost = db.query(func.avg(ProductionBatch.unit_cost)).filter(ProductionBatch.product_id == item.product_id).scalar()
-                        unit_cost = avg_cost or 0
-                    order_cogs += item.total_quantity * unit_cost
-            
-                report_data.append({
-                    "Дата": o.order_date,
-                    "Клиент": o.customer_name,
-                    "Выручка": float(o.total_amount),
-                    "Себестоимость": float(order_cogs),
-                    "Доставка": float(o.delivery_cost),
-                    "Маржа": float(o.total_amount - order_cogs - o.delivery_cost),
-                    "Статус": o.order_status,
-                })
-        
-            st.dataframe(pd.DataFrame(report_data), use_container_width=True, hide_index=True)
+
+            st.subheader("Заказы")
+            order_rows = [
+                {
+                    "Заказ": f"#{report.order_id}",
+                    "Дата": report.order_date,
+                    "Клиент": report.customer_name,
+                    "Выручка": float(report.revenue),
+                    "Прямая себестоимость": float(report.direct_cost),
+                    "Доставка": float(report.delivery_cost),
+                    "Валовая маржа": float(report.gross_margin),
+                    "Маржа, %": (
+                        float(report.gross_margin_percent)
+                        if report.gross_margin_percent is not None
+                        else None
+                    ),
+                    "Статус заказа": report.order_status,
+                    "Оплата": report.payment_status,
+                    "Резерв": report.reservation_status,
+                    "Пока не включено": ", ".join(report.excluded_components),
+                }
+                for report in reports
+            ]
+            st.dataframe(pd.DataFrame(order_rows), use_container_width=True, hide_index=True)
+
+            st.subheader("Строки заказов")
+            line_rows = [
+                {
+                    "Заказ": f"#{report.order_id}",
+                    "Клиент": report.customer_name,
+                    "Продукт": line.product_name,
+                    "Партия ГП": f"#{line.output_id}" if line.output_id is not None else "Не выбрана",
+                    "Производственная партия": (
+                        f"#{line.batch_id}" if line.batch_id is not None else "Не выбрана"
+                    ),
+                    "Фасовка": f"{line.package_size:,.3f} {line.unit_short_name}",
+                    "Кол-во фасовок": line.package_count,
+                    "Цена продажи за 1 фасовку": float(line.sale_price_per_package),
+                    "Себестоимость 1 фасовки": float(line.direct_cost_per_package),
+                    "Маржа на 1 фасовку": float(line.margin_per_package),
+                    "Выручка строки": float(line.revenue),
+                    "Себестоимость строки": float(line.direct_cost),
+                    "Маржа строки": float(line.margin),
+                    "Маржа строки, %": (
+                        float(line.margin_percent)
+                        if line.margin_percent is not None
+                        else None
+                    ),
+                    "Источник себестоимости": line.cost_source,
+                }
+                for report in reports
+                for line in report.lines
+            ]
+            if line_rows:
+                st.dataframe(pd.DataFrame(line_rows), use_container_width=True, hide_index=True)
+            else:
+                st.warning("В заказах нет строк с выбранной партией готовой продукции для расчёта маржи.")
