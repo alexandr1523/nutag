@@ -43,6 +43,11 @@
 - All UI labels, item types, statuses, and user-facing text must be in Russian.
 
 ## Business Direction
+- Online mode for one real-data user is the current priority.
+- PostgreSQL is the target database for real data and production-like checks, both locally and online.
+- Online deployment must use an external PostgreSQL database via `NUTAG_DATABASE_URL`/secrets; do not rely on an app-host SQLite file for durable online data.
+- Local SQLite remains only a dev/fallback mode for quick startup, tests, demos, and temporary local work.
+- Do not build full registration, roles, or multi-user SaaS infrastructure unless explicitly approved; implement only minimal one-user access protection for the online MVP.
 - Equipment amortization should follow volume-based distribution across production volume.
 - Users should be able to select specific available purchases or preparations that are still in stock.
 - Real-time stock deduction after recording preparations or production is preferred over deferred reconciliation.

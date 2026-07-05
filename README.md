@@ -2,7 +2,7 @@
 
 Платформа для ведения бизнеса.
 
-На текущем этапе проект развивается как локальное Streamlit-приложение для управленческого учёта домашнего производства замороженных полуфабрикатов.
+На текущем этапе проект развивается как Streamlit-приложение для управленческого учёта домашнего производства замороженных полуфабрикатов. Текущий трек доработки — PostgreSQL как целевая БД для реальных данных локально и онлайн; SQLite остаётся только dev/fallback-режимом.
 
 ## Документы проекта
 
@@ -140,15 +140,23 @@ python3 -m compileall app.py nutag tests
 
 Эта команда проверяет, что Python-файлы компилируются без синтаксических ошибок.
 
-## Запуск приложения
+## Запуск приложения локально
 
-По умолчанию рабочая SQLite-БД хранится вне папки проекта:
+Для реальных данных локально предпочтительно использовать PostgreSQL через `NUTAG_DATABASE_URL`, чтобы локальная среда не расходилась с онлайн-deploy.
+
+```powershell
+$env:NUTAG_DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME?sslmode=require"
+```
+
+### Dev/fallback SQLite
+
+Если `NUTAG_DATABASE_URL` не задан, приложение использует fallback SQLite вне папки проекта:
 
 - Windows: `%LOCALAPPDATA%\Nutag\nutag.sqlite3`
 - macOS: `~/Library/Application Support/Nutag/nutag.sqlite3`
 - Linux: `$XDG_DATA_HOME/Nutag/nutag.sqlite3` или `~/.local/share/Nutag/nutag.sqlite3`
 
-Если нужен другой файл БД, задай переменную окружения:
+Если нужен другой SQLite-файл для временной проверки, задай переменную окружения:
 
 ```powershell
 $env:NUTAG_DATABASE_URL = "sqlite:///C:/Users/alexa/AppData/Local/Nutag/nutag.sqlite3"
@@ -161,6 +169,12 @@ streamlit run app.py
 ```
 
 После запуска Streamlit покажет локальный адрес в терминале.
+
+## Онлайн-режим
+
+Онлайн-режим является текущим направлением доработки, но для реальных данных он должен использовать внешний PostgreSQL через `NUTAG_DATABASE_URL`/secrets. SQLite не считается production-like источником истины и не подходит как устойчивое хранилище внутри облачного окружения приложения.
+
+Актуальный порядок работ и ограничения описаны в `IMPLEMENTATION_PLAN.md`, детали хранения БД — в `docs/DATABASE_STORAGE.md`.
 
 ## Проверка состояния git
 
