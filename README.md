@@ -10,6 +10,7 @@
 - `docs/DECISIONS.md` — принятые, изменённые и отклонённые решения с причинами.
 - `docs/CHANGELOG_IMPLEMENTATION.md` — подробная история реализации.
 - `docs/REQUIREMENTS_AUDIT.md` — актуальность исходной функциональной постановки.
+- `docs/DATABASE_STORAGE.md` — где хранится БД, как работают backup и restore.
 - `README_FUNCTIONAL.md` и файлы `01...04...` — исходная постановка; перед реализацией сверять с audit и decisions.
 
 ## Что означает блок `Testing` в сообщениях агента
@@ -140,6 +141,20 @@ python3 -m compileall app.py nutag tests
 Эта команда проверяет, что Python-файлы компилируются без синтаксических ошибок.
 
 ## Запуск приложения
+
+По умолчанию рабочая SQLite-БД хранится вне папки проекта:
+
+- Windows: `%LOCALAPPDATA%\Nutag\nutag.sqlite3`
+- macOS: `~/Library/Application Support/Nutag/nutag.sqlite3`
+- Linux: `$XDG_DATA_HOME/Nutag/nutag.sqlite3` или `~/.local/share/Nutag/nutag.sqlite3`
+
+Если нужен другой файл БД, задай переменную окружения:
+
+```powershell
+$env:NUTAG_DATABASE_URL = "sqlite:///C:/Users/alexa/AppData/Local/Nutag/nutag.sqlite3"
+```
+
+Подробности по backup/restore: `docs/DATABASE_STORAGE.md`.
 
 ```bash
 streamlit run app.py

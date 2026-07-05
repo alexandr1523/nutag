@@ -1,9 +1,10 @@
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 from sqlalchemy import inspect, select, text
 
-from nutag.db import create_database, create_engine_for_url, create_session_factory, initialize_database
+from nutag.db import create_database, create_engine_for_url, create_session_factory, default_sqlite_path, initialize_database
 from nutag.db.models import Ingredient, Packaging, Product, Purchase, PurchaseItem, PurchaseItemType, Unit
 
 
@@ -28,6 +29,45 @@ def test_create_database_creates_initial_tables() -> None:
         "batch_preparation_uses",
         "finished_product_outputs",
     }.issubset(table_names)
+
+
+def test_create_engine_uses_database_url_env(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "configured" / "nutag.sqlite3"
+    monkeypatch.setenv("NUTAG_DATABASE_URL", f"sqlite:///{db_path}")
+
+    engine = create_engine_for_url()
+
+    assert engine.url.database == str(db_path)
+    assert db_path.parent.exists()
+
+
+def test_default_sqlite_path_uses_user_data_directory(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("NUTAG_DATABASE_URL", raising=False)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+
+    path = default_sqlite_path()
+
+    assert path.name == "nutag.sqlite3"
+    assert path.parent.name == "Nutag"
+    assert not path.is_relative_to(Path.cwd())
+
+
+def test_create_engine_copies_legacy_project_sqlite_to_user_data(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("NUTAG_DATABASE_URL", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+
+    legacy_path = tmp_path / "nutag.sqlite3"
+    legacy_path.write_bytes(b"legacy database")
+
+    create_engine_for_url()
+
+    copied_path = default_sqlite_path()
+    assert copied_path.exists()
+    assert copied_path.read_bytes() == b"legacy database"
+    assert legacy_path.exists()
 
 
 def test_initialize_database_upgrades_legacy_sqlite_without_alembic(tmp_path) -> None:
@@ -97,6 +137,8 @@ def test_initialize_database_upgrades_legacy_sqlite_without_alembic(tmp_path) ->
     initialize_database(engine)
 
     inspector = inspect(engine)
+    backups = list((db_path.parent / "backups").glob("legacy.before-initialization.*.sqlite3"))
+    assert len(backups) == 1
     assert "alembic_version" in inspector.get_table_names()
     assert "consumables" in inspector.get_table_names()
     assert "orders" in inspector.get_table_names()
