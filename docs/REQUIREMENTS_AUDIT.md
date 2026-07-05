@@ -102,6 +102,6 @@
 |---|---|---|
 | Устойчивое локальное хранение реальной БД. | `implemented` | Реализованы `NUTAG_DATABASE_URL`, дефолтный пользовательский SQLite-файл вне проекта и перенос старой проектной БД при первом переходе. |
 | Backup/restore перед миграциями SQLite. | `implemented` | Backup создаётся перед миграциями, первичной инициализацией старой БД и compatibility-исправлениями; restore описан в `docs/DATABASE_STORAGE.md`. |
-| Общий DB helper для Streamlit-страниц. | `not started` | Следующий инфраструктурный шаг после хранения БД. |
+| Общий DB helper для Streamlit-страниц. | `implemented` | `app.py` и Streamlit-страницы используют единый runtime-helper для создания `engine`, инициализации схемы и получения `SessionLocal`. |
 | Онлайн-режим для одного пользователя. | `later` | Не текущий фокус. |
 | Связанная система документов. | `implemented in docs` | План, решения, changelog и audit связаны между собой. |

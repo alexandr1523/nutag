@@ -8,9 +8,8 @@ from types import SimpleNamespace
 
 import streamlit as st
 
-from nutag.db.init_db import initialize_database
 from nutag.db.models import Ingredient, LaborRate, PreparationType, PurchaseItemType, Unit
-from nutag.db.session import create_engine_for_url, create_session_factory
+from nutag.db.runtime import create_app_database
 from nutag.services.inventory import list_available_stock_batches
 from nutag.services.preparations import (
     PreparationIngredientInput,
@@ -26,9 +25,7 @@ st.set_page_config(page_title="Заготовки | Nutag", page_icon="🥣", la
 
 st.title("🥣 Заготовки")
 
-engine = create_engine_for_url()
-initialize_database(engine)
-SessionLocal = create_session_factory(engine)
+engine, SessionLocal = create_app_database()
 
 tabs = st.tabs(["История заготовок", "Новая заготовка"])
 

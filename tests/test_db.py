@@ -4,7 +4,14 @@ from pathlib import Path
 
 from sqlalchemy import inspect, select, text
 
-from nutag.db import create_database, create_engine_for_url, create_session_factory, default_sqlite_path, initialize_database
+from nutag.db import (
+    create_app_database,
+    create_database,
+    create_engine_for_url,
+    create_session_factory,
+    default_sqlite_path,
+    initialize_database,
+)
 from nutag.db.models import Ingredient, Packaging, Product, Purchase, PurchaseItem, PurchaseItemType, Unit
 
 
@@ -29,6 +36,22 @@ def test_create_database_creates_initial_tables() -> None:
         "batch_preparation_uses",
         "finished_product_outputs",
     }.issubset(table_names)
+
+
+def test_create_app_database_initializes_schema_and_session_factory() -> None:
+    engine, session_factory = create_app_database("sqlite:///:memory:")
+
+    table_names = set(inspect(engine).get_table_names())
+    assert "units" in table_names
+
+    with session_factory() as session:
+        session.add(Unit(name="kilogram", short_name="kg"))
+        session.commit()
+
+    with session_factory() as session:
+        saved_unit = session.scalar(select(Unit).where(Unit.short_name == "kg"))
+        assert saved_unit is not None
+        assert saved_unit.name == "kilogram"
 
 
 def test_create_engine_uses_database_url_env(monkeypatch, tmp_path) -> None:

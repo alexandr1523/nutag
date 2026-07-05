@@ -8,9 +8,8 @@ from decimal import Decimal
 import pandas as pd
 import streamlit as st
 
-from nutag.db.init_db import initialize_database
 from nutag.db.models import FinishedProductPacking, Packaging, PurchaseItemType, Unit
-from nutag.db.session import create_engine_for_url, create_session_factory
+from nutag.db.runtime import create_app_database
 from nutag.services.inventory import list_available_bulk_finished_product_outputs, list_available_stock_batches
 from nutag.services.packing import (
     delete_finished_product_packing,
@@ -45,9 +44,7 @@ st.set_page_config(page_title="Фасовка ГП | Nutag", page_icon="📦", l
 
 st.title("📦 Фасовка ГП")
 
-engine = create_engine_for_url()
-initialize_database(engine)
-SessionLocal = create_session_factory(engine)
+engine, SessionLocal = create_app_database()
 
 tabs = st.tabs(["Новая фасовка", "История фасовки"])
 

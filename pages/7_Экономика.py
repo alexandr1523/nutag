@@ -5,8 +5,7 @@ from __future__ import annotations
 import streamlit as st
 import pandas as pd
 
-from nutag.db.init_db import initialize_database
-from nutag.db.session import create_engine_for_url, create_session_factory
+from nutag.db.runtime import create_app_database
 from nutag.services.economics import list_finished_product_cost_reports, list_order_margin_reports
 
 
@@ -15,9 +14,7 @@ st.set_page_config(page_title="Экономика | Nutag", page_icon="📊", la
 st.title("📊 Экономика")
 
 # Session management
-engine = create_engine_for_url()
-initialize_database(engine)
-SessionLocal = create_session_factory(engine)
+engine, SessionLocal = create_app_database()
 
 with SessionLocal() as db:
     tabs = st.tabs(["Себестоимость партий ГП", "Заказы и маржа"])

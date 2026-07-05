@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import logging
 import streamlit as st
-from nutag.db.session import create_engine_for_url, create_session_factory
-from nutag.db.init_db import initialize_database
+from nutag.db.runtime import create_app_database
 from nutag.services.validation import get_control_signals
 
 # Configure logging
@@ -24,11 +23,8 @@ st.set_page_config(page_title="Nutag", page_icon="🥟", layout="wide")
 
 try:
     # Database initialization
-    engine = create_engine_for_url()
-    initialize_database(engine)
+    engine, SessionLocal = create_app_database()
     logger.info("Database initialized successfully")
-    
-    SessionLocal = create_session_factory(engine)
 
     st.title("Nutag")
     st.subheader("MVP учёта домашнего производства полуфабрикатов")

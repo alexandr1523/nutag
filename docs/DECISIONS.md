@@ -27,6 +27,7 @@
 | `active` | Для реальных данных одного пользователя MVP использует локальный SQLite в пользовательском каталоге вне папки проекта. | SQLite подходит для локального одного пользователя, но рабочая БД не должна теряться при обновлениях проекта. | `IMPLEMENTATION_PLAN.md`, `docs/DATABASE_STORAGE.md` |
 | `active` | Подключение к БД задаётся через `NUTAG_DATABASE_URL`, если переменная окружения задана. | Это сохраняет локальный режим простым и оставляет путь к внешней БД без переписывания кода. | `nutag/db/session.py`, `docs/DATABASE_STORAGE.md` |
 | `active` | Перед изменениями схемы SQLite создаётся backup рядом с рабочей БД. | Обновление версий не должно оставлять пользователя без возможности восстановить реальные данные. | `nutag/db/init_db.py`, `docs/DATABASE_STORAGE.md` |
+| `active` | Streamlit-страницы подключаются к БД через общий runtime-helper. | Единая точка создания `engine`, инициализации схемы и `SessionLocal` снижает риск расхождения поведения между страницами. | `nutag/db/runtime.py`, `app.py`, `pages/*` |
 | `active` | Проект должен быть совместим с будущим PostgreSQL через database URL, но онлайн-режим не является текущим фокусом. | Не нужно усложнять MVP полноценным SaaS, но нельзя закрывать путь к онлайн-режиму. | `IMPLEMENTATION_PLAN.md` |
 | `active` | План ведётся как `Execution Queue + Domain Backlog`. | Backlog по областям не должен подменять последовательность работ. | `AGENTS.md`, `.codex/skills/nutag-roadmap-maintenance/SKILL.md`, `IMPLEMENTATION_PLAN.md` |
 

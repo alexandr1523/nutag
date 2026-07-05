@@ -7,9 +7,8 @@ from decimal import Decimal
 
 import streamlit as st
 
-from nutag.db.init_db import initialize_database
 from nutag.db.models import Consumable, Ingredient, Packaging, PurchaseItemType, Unit
-from nutag.db.session import create_engine_for_url, create_session_factory
+from nutag.db.runtime import create_app_database
 from nutag.services.inventory import list_available_stock_batches, list_inventory_balances
 from nutag.services.purchases import (
     PurchaseLineInput,
@@ -64,9 +63,7 @@ st.set_page_config(page_title="Закупки и остатки | Nutag", page_i
 st.title("📦 Закупки и остатки")
 
 # Session management
-engine = create_engine_for_url()
-initialize_database(engine)
-SessionLocal = create_session_factory(engine)
+engine, SessionLocal = create_app_database()
 
 tabs = st.tabs(["Текущие остатки", "Остатки по партиям", "История закупок", "Новая закупка"])
 

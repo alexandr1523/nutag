@@ -1,8 +1,7 @@
 """Streamlit page for exporting data to Excel."""
 
 import streamlit as st
-from nutag.db.init_db import initialize_database
-from nutag.db.session import create_engine_for_url, create_session_factory
+from nutag.db.runtime import create_app_database
 from nutag.services.exports import (
     export_inventory_to_excel,
     export_orders_to_excel,
@@ -13,9 +12,7 @@ st.set_page_config(page_title="Экспорт | Nutag", page_icon="📥", layout
 
 st.title("📥 Экспорт данных")
 
-engine = create_engine_for_url()
-initialize_database(engine)
-SessionLocal = create_session_factory(engine)
+engine, SessionLocal = create_app_database()
 
 st.info("Здесь вы можете скачать текущие данные в формате Excel (.xlsx)")
 
