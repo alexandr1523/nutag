@@ -54,3 +54,4 @@
 - `pending` — PostgreSQL smoke-check успешно выполнен на Neon: Alembic использовал `PostgresqlImpl`, схема инициализирована, создано 24 таблицы, `alembic_version` есть; следующим шагом стала минимальная защита доступа.
 - `pending` — добавлена минимальная одно-пользовательская защита Streamlit: `NUTAG_APP_PASSWORD` читается из env/secrets, PostgreSQL-режим без пароля блокируется, после правильного пароля открываются страницы; требуется ручная UI-проверка.
 - `pending` — добавлена понятная блокировка Streamlit при некорректном `NUTAG_DATABASE_URL`, чтобы неверно заданная переменная окружения не приводила к traceback при открытии страниц.
+- `pending` — online-secrets guard усилен: Streamlit root-level secrets для `NUTAG_DATABASE_URL` и `NUTAG_APP_PASSWORD` поднимаются в окружение до инициализации БД, пароль без явного database URL блокирует приложение вместо скрытого SQLite fallback; кнопка завершения процесса убрана из главной страницы.

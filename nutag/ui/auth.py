@@ -13,6 +13,7 @@ from nutag.db.session import DATABASE_URL_ENV, database_url
 
 APP_PASSWORD_ENV = "NUTAG_APP_PASSWORD"
 AUTH_SESSION_KEY = "nutag_authenticated"
+STREAMLIT_SECRET_ENV_NAMES = (DATABASE_URL_ENV, APP_PASSWORD_ENV)
 
 
 def is_postgresql_url(url: str) -> bool:
@@ -20,6 +21,15 @@ def is_postgresql_url(url: str) -> bool:
 
     try:
         return make_url(url).drivername.startswith("postgresql")
+    except ArgumentError:
+        return False
+
+
+def is_sqlite_url(url: str) -> bool:
+    """Return whether a database URL points to SQLite."""
+
+    try:
+        return make_url(url).drivername.startswith("sqlite")
     except ArgumentError:
         return False
 
@@ -48,6 +58,17 @@ def _secret_value(name: str) -> str | None:
     return str(value) if value else None
 
 
+def load_streamlit_secrets_into_environment(names: tuple[str, ...] = STREAMLIT_SECRET_ENV_NAMES) -> None:
+    """Expose configured Streamlit secrets through ``os.environ`` for shared DB code."""
+
+    for name in names:
+        if os.environ.get(name):
+            continue
+        value = _secret_value(name)
+        if value:
+            os.environ[name] = value
+
+
 def configured_app_password() -> str | None:
     """Read the app password from environment or Streamlit secrets."""
 
@@ -57,11 +78,20 @@ def configured_app_password() -> str | None:
 def require_app_access() -> None:
     """Stop the page unless the current Streamlit session is authenticated."""
 
+    load_streamlit_secrets_into_environment()
     password = configured_app_password()
     current_database_url = database_url()
 
     if not database_url_is_valid(current_database_url):
         st.error(f"`{DATABASE_URL_ENV}` задан неверно. Проверьте строку подключения к БД.")
+        st.stop()
+
+    if app_password_configured(password) and DATABASE_URL_ENV not in os.environ and is_sqlite_url(current_database_url):
+        st.error(
+            f"`{APP_PASSWORD_ENV}` задан, но `{DATABASE_URL_ENV}` не найден. "
+            "Для онлайн-режима нужно явно указать внешнюю PostgreSQL-БД в переменных окружения "
+            "или Streamlit secrets."
+        )
         st.stop()
 
     if not app_password_configured(password):

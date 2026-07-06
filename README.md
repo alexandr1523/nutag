@@ -174,7 +174,18 @@ streamlit run app.py
 
 Онлайн-режим является текущим направлением доработки, но для реальных данных он должен использовать внешний PostgreSQL через `NUTAG_DATABASE_URL`/secrets. SQLite не считается production-like источником истины и не подходит как устойчивое хранилище внутри облачного окружения приложения.
 
-Для минимальной защиты доступа задай пароль приложения:
+Для Streamlit Cloud нужно задать оба root-level секрета:
+
+```toml
+NUTAG_DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME?sslmode=require"
+NUTAG_APP_PASSWORD = "replace-with-real-password"
+```
+
+`NUTAG_DATABASE_URL` указывает на внешнюю PostgreSQL-БД. `NUTAG_APP_PASSWORD` задаёт минимальный пароль доступа к приложению. Если пароль задан, а PostgreSQL URL отсутствует, приложение блокируется вместо скрытого перехода на SQLite fallback.
+
+После изменения secrets в Streamlit Cloud нужно перезапустить приложение через **Reboot app** или дождаться повторного deploy.
+
+Для минимальной защиты доступа локально можно задать пароль приложения:
 
 ```powershell
 $env:NUTAG_APP_PASSWORD = "replace-with-real-password"
