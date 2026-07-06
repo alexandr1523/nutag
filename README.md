@@ -11,6 +11,7 @@
 - `docs/CHANGELOG_IMPLEMENTATION.md` — подробная история реализации.
 - `docs/REQUIREMENTS_AUDIT.md` — актуальность исходной функциональной постановки.
 - `docs/DATABASE_STORAGE.md` — где хранится БД, как работают backup и restore.
+- `docs/STREAMLIT_CLOUD_DEPLOY.md` — настройки Streamlit Cloud, secrets и smoke-check после deploy.
 - `README_FUNCTIONAL.md` и файлы `01...04...` — исходная постановка; перед реализацией сверять с audit и decisions.
 
 ## Что означает блок `Testing` в сообщениях агента
@@ -173,6 +174,8 @@ streamlit run app.py
 ## Онлайн-режим
 
 Онлайн-режим является текущим направлением доработки, но для реальных данных он должен использовать внешний PostgreSQL через `NUTAG_DATABASE_URL`/secrets. SQLite не считается production-like источником истины и не подходит как устойчивое хранилище внутри облачного окружения приложения.
+
+Полная инструкция deploy: `docs/STREAMLIT_CLOUD_DEPLOY.md`.
 
 Для Streamlit Cloud нужно задать оба root-level секрета:
 
