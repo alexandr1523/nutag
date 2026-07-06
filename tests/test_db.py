@@ -64,6 +64,19 @@ def test_create_engine_uses_database_url_env(monkeypatch, tmp_path) -> None:
     assert db_path.parent.exists()
 
 
+def test_create_engine_accepts_postgresql_database_url_env(monkeypatch) -> None:
+    monkeypatch.setenv("NUTAG_DATABASE_URL", "postgresql+psycopg://user:pass@localhost:5432/nutag")
+
+    engine = create_engine_for_url()
+
+    assert engine.url.drivername == "postgresql+psycopg"
+    assert engine.url.username == "user"
+    assert engine.url.password == "pass"
+    assert engine.url.host == "localhost"
+    assert engine.url.port == 5432
+    assert engine.url.database == "nutag"
+
+
 def test_default_sqlite_path_uses_user_data_directory(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("NUTAG_DATABASE_URL", raising=False)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))

@@ -32,12 +32,13 @@
 4. `done` Устойчивое локальное хранение БД: поддержать `NUTAG_DATABASE_URL`, перенести дефолтный SQLite-файл в пользовательский каталог вне проекта, добавить backup перед миграциями SQLite и описать restore-сценарий.
 5. `done` Общий DB helper для Streamlit-страниц: вынесено повторяющееся создание `engine`, `SessionLocal` и `initialize_database` в общий runtime-модуль; `app.py` и страницы подключены через него.
 6. `done` Привести README/инструкции запуска к новой модели локального хранения БД и backup/restore.
-7. `next` Сделать PostgreSQL целевой БД для реальных данных: подключить PostgreSQL через `NUTAG_DATABASE_URL`/secrets, добавить PostgreSQL-драйвер, проверить миграции на PostgreSQL URL и оставить SQLite только как dev/fallback.
-8. `not started` Минимальная защита доступа для онлайн-приложения одного пользователя без полноценной регистрации и многопользовательской модели.
-9. `not started` Документация deploy/secrets для Streamlit Cloud: branch, main file, Python version, обязательные secrets/env и smoke-check после запуска.
-10. `not started` Сценарий переноса и защиты реальных данных: SQLite/dev или старая локальная БД -> PostgreSQL, backup/restore у провайдера БД, запрет опоры на SQLite как production-like хранилище.
-11. `later` Основа плановой себестоимости и амортизации оборудования.
-12. `later` Помощник расчёта цены продажи.
+7. `partial` Сделать PostgreSQL целевой БД для реальных данных: PostgreSQL-драйвер добавлен, `NUTAG_DATABASE_URL` с `postgresql+psycopg` покрыт тестом, добавлен smoke-check `scripts/check_database_url.py`, SQLite оставлен dev/fallback; осталось проверить миграции на реальном PostgreSQL URL.
+8. `next` Проверить PostgreSQL на реальном `NUTAG_DATABASE_URL`: подключить пустую PostgreSQL-БД, запустить `scripts/check_database_url.py`, убедиться в dialect `postgresql`, наличии `alembic_version` и успешной инициализации схемы.
+9. `not started` Минимальная защита доступа для онлайн-приложения одного пользователя без полноценной регистрации и многопользовательской модели.
+10. `not started` Документация deploy/secrets для Streamlit Cloud: branch, main file, Python version, обязательные secrets/env и smoke-check после запуска.
+11. `not started` Сценарий переноса и защиты реальных данных: SQLite/dev или старая локальная БД -> PostgreSQL, backup/restore у провайдера БД, запрет опоры на SQLite как production-like хранилище.
+12. `later` Основа плановой себестоимости и амортизации оборудования.
+13. `later` Помощник расчёта цены продажи.
 
 ## 1. Текущее состояние
 
@@ -63,7 +64,7 @@
 ### 1.2. Проверка
 
 - Команда проверки: `.venv\Scripts\python.exe -m pytest`.
-- Текущее состояние автотестов: `87 passed`.
+- Текущее состояние автотестов: `88 passed`.
 - Покрыто тестами: расчёты, БД, закупки, партийные остатки, заготовки, производство, заказы, локализация enum/status.
 - Не покрыто автотестами: Streamlit UI, ручные сценарии редактирования, полноценные отчёты.
 
@@ -248,7 +249,7 @@
 - `partial` Русская локализация интерфейса.
 - `done` Общий helper для подключения к БД и инициализации приложения: `app.py` и Streamlit-страницы используют единый runtime-helper.
 - `done` Устойчивое хранение локальной БД: поддержать `NUTAG_DATABASE_URL`, перенести дефолтный SQLite-файл в пользовательский каталог вне проекта, добавить backup перед миграциями SQLite и описать restore-сценарий.
-- `current` PostgreSQL как целевая БД для реальных данных: использовать PostgreSQL через `NUTAG_DATABASE_URL`/secrets локально и онлайн, добавить PostgreSQL-драйвер, проверить Alembic-миграции на PostgreSQL URL, оставить SQLite только как dev/fallback.
+- `partial` PostgreSQL как целевая БД для реальных данных: PostgreSQL-драйвер добавлен, URL с `postgresql+psycopg` покрыт тестом, smoke-check `scripts/check_database_url.py` добавлен; осталось выполнить smoke-check на реальной PostgreSQL-БД.
 - `not started` Минимальная защита доступа для онлайн-приложения: один пользователь, секрет/пароль в настройках окружения, без регистрации и многопользовательской модели.
 - `not started` Документация deploy/secrets для Streamlit Cloud: branch, main file, Python version, обязательные secrets/env, smoke-check и восстановление после неудачного deploy.
 - `not started` Перенос реальных данных в PostgreSQL: безопасный экспорт/импорт или миграционный сценарий из SQLite/dev или старой локальной БД, проверка контрольных остатков и план backup/restore у провайдера PostgreSQL.
@@ -283,17 +284,16 @@
 
 Текущий трек: `Онлайн-режим для одного пользователя`.
 
-Следующий шаг: сделать PostgreSQL целевой БД для реальных данных.
+Следующий шаг: проверить PostgreSQL на реальном `NUTAG_DATABASE_URL`.
 
 Ожидаемый результат:
 
-- проект имеет runtime-зависимость для подключения к PostgreSQL;
-- `NUTAG_DATABASE_URL`/secrets можно использовать для PostgreSQL локально и в онлайн-deploy;
-- миграции и инициализация схемы проверяются через общий DB helper на PostgreSQL URL;
-- SQLite остаётся только dev/fallback для быстрого запуска, тестов, демо и временной локальной работы;
-- план явно запрещает использовать SQLite как production-like источник истины или устойчивое хранилище реальных онлайн-данных.
+- задан `NUTAG_DATABASE_URL` на пустую или тестовую PostgreSQL-БД;
+- команда `.venv\Scripts\python.exe scripts\check_database_url.py` завершается успешно;
+- вывод показывает dialect `postgresql`, наличие `alembic_version` и созданные таблицы;
+- после проверки можно переходить к минимальной защите доступа.
 
-Почему это следующий шаг: пользователь выбрал PostgreSQL как целевой runtime для реальных данных, чтобы локальная и онлайн-среда не расходились. Плановая экономика остаётся в очереди как `later`, а текущий первый незавершённый пункт `Текущей очереди работ` — PostgreSQL, secrets/env и проверка миграций.
+Почему это следующий шаг: PostgreSQL-драйвер, зависимость и локальный smoke-check уже подготовлены, но без реального PostgreSQL URL нельзя подтвердить миграции и инициализацию схемы на целевой СУБД.
 
 ## 7. Связанные документы
 

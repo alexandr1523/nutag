@@ -68,6 +68,15 @@ NUTAG_APP_PASSWORD = "replace-with-real-password-after-access-gate-is-implemente
 - сценарий переноса SQLite/dev или старой локальной БД в PostgreSQL либо ручного повторного ввода с контрольной сверкой остатков;
 - backup/restore PostgreSQL у выбранного провайдера.
 
+Проверка подключения и инициализации схемы:
+
+```powershell
+$env:NUTAG_DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME?sslmode=require"
+.\.venv\Scripts\python.exe scripts\check_database_url.py
+```
+
+Ожидаемый результат: dialect `postgresql`, наличие таблицы `alembic_version` и ненулевое количество таблиц. Запускать эту проверку нужно на пустой или тестовой PostgreSQL-БД до переноса реальных данных.
+
 ## Backup перед изменением схемы
 
 Перед изменениями схемы SQLite приложение создаёт копию в папке `backups` рядом с файлом БД.

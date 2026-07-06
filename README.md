@@ -174,6 +174,13 @@ streamlit run app.py
 
 Онлайн-режим является текущим направлением доработки, но для реальных данных он должен использовать внешний PostgreSQL через `NUTAG_DATABASE_URL`/secrets. SQLite не считается production-like источником истины и не подходит как устойчивое хранилище внутри облачного окружения приложения.
 
+Проверка подключения и инициализации схемы на тестовой PostgreSQL-БД:
+
+```powershell
+$env:NUTAG_DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME?sslmode=require"
+.\.venv\Scripts\python.exe scripts\check_database_url.py
+```
+
 Актуальный порядок работ и ограничения описаны в `IMPLEMENTATION_PLAN.md`, детали хранения БД — в `docs/DATABASE_STORAGE.md`.
 
 ## Проверка состояния git
