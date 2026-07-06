@@ -16,6 +16,7 @@ from nutag.services.packing import (
     is_finished_product_packing_used,
     pack_finished_product,
 )
+from nutag.ui.auth import require_app_access
 
 
 def format_money(value: Decimal | int | float | str) -> str:
@@ -41,6 +42,7 @@ def build_packaging_label(stock) -> str:
 
 
 st.set_page_config(page_title="Фасовка ГП | Nutag", page_icon="📦", layout="wide")
+require_app_access()
 
 st.title("📦 Фасовка ГП")
 

@@ -12,6 +12,7 @@ from nutag.db import (
     default_sqlite_path,
     initialize_database,
 )
+from nutag.db.init_db import _alembic_config
 from nutag.db.models import Ingredient, Packaging, Product, Purchase, PurchaseItem, PurchaseItemType, Unit
 
 
@@ -75,6 +76,15 @@ def test_create_engine_accepts_postgresql_database_url_env(monkeypatch) -> None:
     assert engine.url.host == "localhost"
     assert engine.url.port == 5432
     assert engine.url.database == "nutag"
+
+
+def test_alembic_config_preserves_database_url_password() -> None:
+    engine = create_engine_for_url("postgresql+psycopg://user:secret@localhost:5432/nutag")
+
+    sqlalchemy_url = _alembic_config(engine).get_main_option("sqlalchemy.url")
+
+    assert sqlalchemy_url == "postgresql+psycopg://user:secret@localhost:5432/nutag"
+    assert "***" not in sqlalchemy_url
 
 
 def test_default_sqlite_path_uses_user_data_directory(monkeypatch, tmp_path) -> None:

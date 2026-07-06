@@ -18,6 +18,7 @@ from nutag.services.purchases import (
     purchase_has_stock_usage,
     update_purchase,
 )
+from nutag.ui.auth import require_app_access
 
 
 def make_empty_purchase_row(default_unit: str) -> dict[str, object]:
@@ -59,6 +60,7 @@ def get_catalog_unit_name(
 
 
 st.set_page_config(page_title="Закупки и остатки | Nutag", page_icon="📦", layout="wide")
+require_app_access()
 
 st.title("📦 Закупки и остатки")
 

@@ -7,9 +7,11 @@ import pandas as pd
 
 from nutag.db.runtime import create_app_database
 from nutag.services.economics import list_finished_product_cost_reports, list_order_margin_reports
+from nutag.ui.auth import require_app_access
 
 
 st.set_page_config(page_title="Экономика | Nutag", page_icon="📊", layout="wide")
+require_app_access()
 
 st.title("📊 Экономика")
 

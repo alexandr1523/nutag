@@ -60,6 +60,8 @@ NUTAG_DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME?sslmod
 NUTAG_APP_PASSWORD = "replace-with-real-password-after-access-gate-is-implemented"
 ```
 
+`NUTAG_APP_PASSWORD` задаёт минимальный пароль доступа к Streamlit-приложению. Если приложение запущено с PostgreSQL URL и этот секрет не задан, страницы с данными должны быть заблокированы. Для dev/fallback SQLite запуск без пароля допускается.
+
 Перед фактическим переносом реальных данных нужно реализовать и проверить:
 
 - отдельного PostgreSQL-пользователя приложения с доступом только к нужной БД;

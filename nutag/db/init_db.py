@@ -62,7 +62,8 @@ def backup_sqlite_database(engine: Engine, *, reason: str) -> Path | None:
 
 def _alembic_config(engine: Engine) -> Config:
     alembic_cfg = Config(str(Path("alembic.ini")))
-    alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url))
+    # Alembic needs the real password to connect; SQLAlchemy masks it in str(url).
+    alembic_cfg.set_main_option("sqlalchemy.url", engine.url.render_as_string(hide_password=False))
     return alembic_cfg
 
 

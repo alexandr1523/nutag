@@ -21,6 +21,7 @@ from nutag.services.production import (
     list_production_batches,
     update_production_batch,
 )
+from nutag.ui.auth import require_app_access
 
 
 def build_batch_option_label(batch) -> str:
@@ -36,6 +37,7 @@ def format_money(value: Decimal) -> str:
 
 
 st.set_page_config(page_title="Производство | Nutag", page_icon="🏭", layout="wide")
+require_app_access()
 
 st.title("🏭 Производство")
 

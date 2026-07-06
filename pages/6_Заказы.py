@@ -9,9 +9,11 @@ from nutag.db.models import Product, Unit, OrderStatus, PaymentStatus, Reservati
 from nutag.db.runtime import create_app_database
 from nutag.services.inventory import list_available_finished_product_outputs
 from nutag.services.orders import create_order, delete_order, list_orders, OrderItemInput, update_order
+from nutag.ui.auth import require_app_access
 
 
 st.set_page_config(page_title="Заказы | Nutag", page_icon="🛍️", layout="wide")
+require_app_access()
 
 st.title("🛍️ Заказы")
 

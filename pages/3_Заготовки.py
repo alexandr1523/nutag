@@ -19,9 +19,11 @@ from nutag.services.preparations import (
     list_preparations,
     update_preparation,
 )
+from nutag.ui.auth import require_app_access
 
 
 st.set_page_config(page_title="Заготовки | Nutag", page_icon="🥣", layout="wide")
+require_app_access()
 
 st.title("🥣 Заготовки")
 

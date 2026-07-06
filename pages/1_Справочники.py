@@ -18,9 +18,11 @@ from nutag.db.models import (
 from nutag.db.runtime import create_app_database
 from nutag.services.maintenance import reset_operational_data
 from nutag.services.references import create_unit
+from nutag.ui.auth import require_app_access
 
 
 st.set_page_config(page_title="Справочники | Nutag", page_icon="📖", layout="wide")
+require_app_access()
 
 st.title("📖 Справочники")
 

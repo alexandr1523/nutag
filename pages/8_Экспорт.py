@@ -7,8 +7,10 @@ from nutag.services.exports import (
     export_orders_to_excel,
     export_production_to_excel
 )
+from nutag.ui.auth import require_app_access
 
 st.set_page_config(page_title="Экспорт | Nutag", page_icon="📥", layout="wide")
+require_app_access()
 
 st.title("📥 Экспорт данных")
 

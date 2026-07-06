@@ -6,6 +6,7 @@ import logging
 import streamlit as st
 from nutag.db.runtime import create_app_database
 from nutag.services.validation import get_control_signals
+from nutag.ui.auth import require_app_access
 
 # Configure logging
 logging.basicConfig(
@@ -20,6 +21,7 @@ logger = logging.getLogger("nutag.app")
 
 # Page configuration
 st.set_page_config(page_title="Nutag", page_icon="🥟", layout="wide")
+require_app_access()
 
 try:
     # Database initialization
