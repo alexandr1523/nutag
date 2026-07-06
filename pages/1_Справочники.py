@@ -467,7 +467,7 @@ with tabs[0]:
         if units:
             for unit in units:
                 render_reference_row(
-                    f"**{unit.name}** ({unit.short_name})",
+                    f"{unit.name} ({unit.short_name})",
                     f"open_edit_unit_{unit.id}",
                     edit_unit_dialog,
                     unit.id,
@@ -524,7 +524,7 @@ with tabs[1]:
         if ingredients:
             for ingredient in ingredients:
                 render_reference_row(
-                    f"**{ingredient.name}** ({ingredient.unit.short_name})",
+                    f"{ingredient.name} ({ingredient.unit.short_name})",
                     f"open_edit_ingredient_{ingredient.id}",
                     edit_ingredient_dialog,
                     ingredient.id,
@@ -564,7 +564,7 @@ with tabs[2]:
         if products:
             for product in products:
                 render_reference_row(
-                    f"**{product.name}**",
+                    product.name,
                     f"open_edit_product_{product.id}",
                     edit_product_dialog,
                     product.id,
@@ -604,7 +604,7 @@ with tabs[3]:
         if preparation_types:
             for preparation_type in preparation_types:
                 render_reference_row(
-                    f"**{preparation_type.name}**",
+                    preparation_type.name,
                     f"open_edit_preparation_type_{preparation_type.id}",
                     edit_preparation_type_dialog,
                     preparation_type.id,
@@ -656,7 +656,7 @@ with tabs[4]:
         if packaging_items:
             for packaging_item in packaging_items:
                 render_reference_row(
-                    f"**{packaging_item.name}** ({packaging_item.unit.short_name})",
+                    f"{packaging_item.name} ({packaging_item.unit.short_name})",
                     f"open_edit_packaging_{packaging_item.id}",
                     edit_packaging_dialog,
                     packaging_item.id,
@@ -708,7 +708,7 @@ with tabs[5]:
         if consumables:
             for consumable in consumables:
                 render_reference_row(
-                    f"**{consumable.name}** ({consumable.unit.short_name})",
+                    f"{consumable.name} ({consumable.unit.short_name})",
                     f"open_edit_consumable_{consumable.id}",
                     edit_consumable_dialog,
                     consumable.id,
