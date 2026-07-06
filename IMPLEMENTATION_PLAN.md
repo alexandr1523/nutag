@@ -33,7 +33,7 @@
 5. `done` Общий DB helper для Streamlit-страниц: вынесено повторяющееся создание `engine`, `SessionLocal` и `initialize_database` в общий runtime-модуль; `app.py` и страницы подключены через него.
 6. `done` Привести README/инструкции запуска к новой модели локального хранения БД и backup/restore.
 7. `partial` Сделать PostgreSQL целевой БД для реальных данных: PostgreSQL-драйвер добавлен, `NUTAG_DATABASE_URL` с `postgresql+psycopg` покрыт тестом, добавлен smoke-check `scripts/check_database_url.py`, SQLite оставлен dev/fallback; осталось проверить миграции на реальном PostgreSQL URL.
-8. `next` Проверить PostgreSQL на реальном `NUTAG_DATABASE_URL`: подключить пустую PostgreSQL-БД, запустить `scripts/check_database_url.py`, убедиться в dialect `postgresql`, наличии `alembic_version` и успешной инициализации схемы.
+8. `next` Проверить PostgreSQL на реальном `NUTAG_DATABASE_URL`: создать отдельного PostgreSQL-пользователя для приложения с доступом только к тестовой/рабочей БД, подключить пустую PostgreSQL-БД, запустить `scripts/check_database_url.py`, убедиться в dialect `postgresql`, наличии `alembic_version` и успешной инициализации схемы.
 9. `not started` Минимальная защита доступа для онлайн-приложения одного пользователя без полноценной регистрации и многопользовательской модели.
 10. `not started` Документация deploy/secrets для Streamlit Cloud: branch, main file, Python version, обязательные secrets/env и smoke-check после запуска.
 11. `not started` Сценарий переноса и защиты реальных данных: SQLite/dev или старая локальная БД -> PostgreSQL, backup/restore у провайдера БД, запрет опоры на SQLite как production-like хранилище.
@@ -288,7 +288,8 @@
 
 Ожидаемый результат:
 
-- задан `NUTAG_DATABASE_URL` на пустую или тестовую PostgreSQL-БД;
+- создан отдельный PostgreSQL-пользователь для приложения с доступом только к нужной БД;
+- задан `NUTAG_DATABASE_URL` этого пользователя на пустую или тестовую PostgreSQL-БД;
 - команда `.venv\Scripts\python.exe scripts\check_database_url.py` завершается успешно;
 - вывод показывает dialect `postgresql`, наличие `alembic_version` и созданные таблицы;
 - после проверки можно переходить к минимальной защите доступа.
