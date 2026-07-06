@@ -76,6 +76,24 @@ def test_create_unit_normalizes_values_and_rejects_duplicates() -> None:
             create_unit(session, name="   ", short_name="шт")
 
 
+def test_create_ingredient_normalizes_values_and_rejects_duplicates() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        kg = create_unit(session, name="Килограмм", short_name="кг")
+        oil = create_ingredient(session, name=" Растительное масло ", unit=kg, comment="  для жарки  ")
+        session.commit()
+
+        assert oil.name == "Растительное масло"
+        assert oil.comment == "для жарки"
+
+        with pytest.raises(ValueError, match="Ингредиент с таким названием уже существует"):
+            create_ingredient(session, name="растительное масло", unit=kg)
+
+        with pytest.raises(ValueError, match="Название обязательно"):
+            create_ingredient(session, name="   ", unit=kg)
+
+
 def test_calculate_purchase_line_total_validates_quantity_and_price() -> None:
     assert calculate_purchase_line_total(quantity="2.5", unit_price="80") == Decimal("200.0")
 

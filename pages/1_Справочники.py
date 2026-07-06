@@ -17,7 +17,7 @@ from nutag.db.models import (
 )
 from nutag.db.runtime import create_app_database
 from nutag.services.maintenance import reset_operational_data
-from nutag.services.references import create_unit
+from nutag.services.references import create_ingredient, create_unit
 from nutag.ui.auth import require_app_access
 
 
@@ -88,32 +88,44 @@ with tabs[0]:
 with tabs[1]:
     st.header("Ингредиенты")
 
+    ingredient_form_version = st.session_state.setdefault("ingredient_form_version", 0)
+
     with SessionLocal() as db:
         units = db.query(Unit).all()
-        unit_options = {unit.name: unit.id for unit in units}
+        unit_options = {unit.name: unit for unit in units}
 
         if not unit_options:
             st.warning("Сначала добавьте единицы измерения")
         else:
             with st.form("add_ingredient"):
                 st.subheader("Добавить ингредиент")
-                name = st.text_input("Название ингредиента")
-                unit_name = st.selectbox("Единица измерения", options=list(unit_options.keys()))
-                comment = st.text_area("Комментарий")
+                name = st.text_input("Название ингредиента", key=f"ingredient_name_{ingredient_form_version}")
+                unit_name = st.selectbox(
+                    "Единица измерения",
+                    options=list(unit_options.keys()),
+                    key=f"ingredient_unit_{ingredient_form_version}",
+                )
+                comment = st.text_area("Комментарий", key=f"ingredient_comment_{ingredient_form_version}")
                 submitted = st.form_submit_button("Добавить")
 
                 if submitted:
-                    if not name:
-                        st.error("Название обязательно")
-                    else:
-                        new_ingredient = Ingredient(name=name, unit_id=unit_options[unit_name], comment=comment)
-                        db.add(new_ingredient)
-                        try:
-                            db.commit()
-                            st.success(f"Ингредиент '{name}' добавлен")
-                        except Exception as e:
-                            db.rollback()
-                            st.error(f"Ошибка при добавлении: {e}")
+                    try:
+                        new_ingredient = create_ingredient(
+                            db,
+                            name=name,
+                            unit=unit_options[unit_name],
+                            comment=comment,
+                        )
+                        db.commit()
+                        st.session_state["ingredient_form_version"] = ingredient_form_version + 1
+                        st.success(f"Ингредиент '{new_ingredient.name}' добавлен")
+                        st.rerun()
+                    except ValueError as e:
+                        db.rollback()
+                        st.error(str(e))
+                    except Exception:
+                        db.rollback()
+                        st.error("Не удалось добавить ингредиент. Проверьте данные и повторите попытку.")
 
     st.subheader("Список ингредиентов")
     with SessionLocal() as db:

@@ -69,7 +69,13 @@ def create_ingredient(
 ) -> Ingredient:
     """Create an ingredient linked to its base measurement unit."""
 
-    ingredient = Ingredient(name=name, unit=unit, comment=comment)
+    cleaned_name = _clean_required_text(name, "Название")
+
+    existing_ingredients = session.scalars(select(Ingredient)).all()
+    if any(_same_text(ingredient.name, cleaned_name) for ingredient in existing_ingredients):
+        raise ValueError("Ингредиент с таким названием уже существует")
+
+    ingredient = Ingredient(name=cleaned_name, unit=unit, comment=_clean_optional_text(comment))
     session.add(ingredient)
     session.flush()
     return ingredient
