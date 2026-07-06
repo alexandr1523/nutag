@@ -5,19 +5,38 @@ from __future__ import annotations
 import streamlit as st
 
 from nutag.db.models import (
-    Consumable,
     Equipment,
     FixedExpenseCategory,
-    Ingredient,
     LaborRate,
-    Packaging,
-    PreparationType,
-    Product,
-    Unit,
 )
 from nutag.db.runtime import create_app_database
 from nutag.services.maintenance import reset_operational_data
-from nutag.services.references import create_ingredient, create_unit
+from nutag.services.references import (
+    create_consumable,
+    create_ingredient,
+    create_packaging,
+    create_preparation_type,
+    create_product,
+    create_unit,
+    delete_consumable,
+    delete_ingredient,
+    delete_packaging,
+    delete_preparation_type,
+    delete_product,
+    delete_unit,
+    list_consumables,
+    list_ingredients,
+    list_packaging,
+    list_preparation_types,
+    list_products,
+    list_units,
+    update_consumable,
+    update_ingredient,
+    update_packaging,
+    update_preparation_type,
+    update_product,
+    update_unit,
+)
 from nutag.ui.auth import require_app_access
 
 
@@ -28,6 +47,373 @@ st.title("📖 Справочники")
 
 # Session management
 engine, SessionLocal = create_app_database()
+
+
+def unit_select_options(units):
+    """Return labels and lookup for unit selectboxes."""
+
+    labels = [f"{unit.name} ({unit.short_name})" for unit in units]
+    return labels, dict(zip(labels, units, strict=True))
+
+
+def find_by_id(records, record_id: int):
+    """Return a record from a freshly loaded list by ID."""
+
+    return next((record for record in records if record.id == record_id), None)
+
+
+def render_reference_row(label: str, button_key: str, dialog, record_id: int) -> None:
+    col_label, col_action = st.columns([6, 1])
+    with col_label:
+        st.write(label)
+    with col_action:
+        if st.button("Изменить", key=button_key):
+            dialog(record_id)
+
+
+def handle_dialog_delete(db, *, delete_func, record_id: int, record_name: str, label: str, key_prefix: str) -> None:
+    st.divider()
+    st.warning(f"Удаление возможно только если {label} не используется в справочниках или операциях.")
+    with st.form(f"delete_{key_prefix}_{record_id}"):
+        confirm_text = st.text_input("Введите УДАЛИТЬ для подтверждения", key=f"delete_confirm_{key_prefix}_{record_id}")
+        delete_submitted = st.form_submit_button("Удалить", type="primary")
+
+        if delete_submitted:
+            if confirm_text != "УДАЛИТЬ":
+                st.error("Для удаления нужно ввести УДАЛИТЬ")
+            else:
+                try:
+                    delete_func(db, record_id)
+                    db.commit()
+                    st.success(f"Запись удалена: {record_name}")
+                    st.rerun()
+                except ValueError as e:
+                    db.rollback()
+                    st.error(str(e))
+                except Exception:
+                    db.rollback()
+                    st.error("Не удалось удалить запись. Проверьте, что она нигде не используется.")
+
+
+@st.dialog("Редактировать единицу измерения")
+def edit_unit_dialog(unit_id: int) -> None:
+    with SessionLocal() as db:
+        unit = find_by_id(list_units(db), unit_id)
+        if unit is None:
+            st.error("Единица измерения не найдена")
+            return
+
+        with st.form(f"edit_unit_{unit.id}"):
+            edit_name = st.text_input("Название", value=unit.name, key=f"edit_unit_name_{unit.id}")
+            edit_short_name = st.text_input("Сокращение", value=unit.short_name, key=f"edit_unit_short_name_{unit.id}")
+            edit_comment = st.text_area("Комментарий", value=unit.comment or "", key=f"edit_unit_comment_{unit.id}")
+            edit_submitted = st.form_submit_button("Сохранить изменения")
+
+            if edit_submitted:
+                try:
+                    updated_unit = update_unit(
+                        db,
+                        unit.id,
+                        name=edit_name,
+                        short_name=edit_short_name,
+                        comment=edit_comment,
+                    )
+                    db.commit()
+                    st.success(f"Единица '{updated_unit.name}' сохранена")
+                    st.rerun()
+                except ValueError as e:
+                    db.rollback()
+                    st.error(str(e))
+                except Exception:
+                    db.rollback()
+                    st.error("Не удалось сохранить единицу измерения. Проверьте данные.")
+
+        handle_dialog_delete(
+            db,
+            delete_func=delete_unit,
+            record_id=unit.id,
+            record_name=f"Единица '{unit.name}'",
+            label="единица",
+            key_prefix="unit",
+        )
+
+
+@st.dialog("Редактировать ингредиент")
+def edit_ingredient_dialog(ingredient_id: int) -> None:
+    with SessionLocal() as db:
+        ingredient = find_by_id(list_ingredients(db), ingredient_id)
+        units = list_units(db)
+        unit_labels, unit_options = unit_select_options(units)
+        if ingredient is None:
+            st.error("Ингредиент не найден")
+            return
+
+        current_label = next(label for label, unit in unit_options.items() if unit.id == ingredient.unit_id)
+        with st.form(f"edit_ingredient_{ingredient.id}"):
+            edit_name = st.text_input(
+                "Название ингредиента",
+                value=ingredient.name,
+                key=f"edit_ingredient_name_{ingredient.id}",
+            )
+            edit_unit_name = st.selectbox(
+                "Единица измерения",
+                options=unit_labels,
+                index=unit_labels.index(current_label),
+                key=f"edit_ingredient_unit_{ingredient.id}",
+            )
+            edit_comment = st.text_area(
+                "Комментарий",
+                value=ingredient.comment or "",
+                key=f"edit_ingredient_comment_{ingredient.id}",
+            )
+            st.caption(
+                "Если ингредиент уже использовался в операциях, можно исправить название и комментарий, "
+                "но нельзя менять единицу измерения."
+            )
+            edit_submitted = st.form_submit_button("Сохранить изменения")
+
+            if edit_submitted:
+                try:
+                    updated_ingredient = update_ingredient(
+                        db,
+                        ingredient.id,
+                        name=edit_name,
+                        unit=unit_options[edit_unit_name],
+                        comment=edit_comment,
+                    )
+                    db.commit()
+                    st.success(f"Ингредиент '{updated_ingredient.name}' сохранён")
+                    st.rerun()
+                except ValueError as e:
+                    db.rollback()
+                    st.error(str(e))
+                except Exception:
+                    db.rollback()
+                    st.error("Не удалось сохранить ингредиент. Проверьте данные.")
+
+        handle_dialog_delete(
+            db,
+            delete_func=delete_ingredient,
+            record_id=ingredient.id,
+            record_name=f"Ингредиент '{ingredient.name}'",
+            label="ингредиент",
+            key_prefix="ingredient",
+        )
+
+
+@st.dialog("Редактировать продукт")
+def edit_product_dialog(product_id: int) -> None:
+    with SessionLocal() as db:
+        product = find_by_id(list_products(db), product_id)
+        if product is None:
+            st.error("Продукт не найден")
+            return
+
+        with st.form(f"edit_product_{product.id}"):
+            edit_name = st.text_input(
+                "Название продукта",
+                value=product.name,
+                key=f"edit_product_name_{product.id}",
+            )
+            edit_comment = st.text_area(
+                "Комментарий",
+                value=product.comment or "",
+                key=f"edit_product_comment_{product.id}",
+            )
+            edit_submitted = st.form_submit_button("Сохранить изменения")
+
+            if edit_submitted:
+                try:
+                    updated_product = update_product(db, product.id, name=edit_name, comment=edit_comment)
+                    db.commit()
+                    st.success(f"Продукт '{updated_product.name}' сохранён")
+                    st.rerun()
+                except ValueError as e:
+                    db.rollback()
+                    st.error(str(e))
+                except Exception:
+                    db.rollback()
+                    st.error("Не удалось сохранить продукт. Проверьте данные.")
+
+        handle_dialog_delete(
+            db,
+            delete_func=delete_product,
+            record_id=product.id,
+            record_name=f"Продукт '{product.name}'",
+            label="продукт",
+            key_prefix="product",
+        )
+
+
+@st.dialog("Редактировать вид заготовки")
+def edit_preparation_type_dialog(preparation_type_id: int) -> None:
+    with SessionLocal() as db:
+        preparation_type = find_by_id(list_preparation_types(db), preparation_type_id)
+        if preparation_type is None:
+            st.error("Вид заготовки не найден")
+            return
+
+        with st.form(f"edit_preparation_type_{preparation_type.id}"):
+            edit_name = st.text_input(
+                "Название вида заготовки",
+                value=preparation_type.name,
+                key=f"edit_preparation_type_name_{preparation_type.id}",
+            )
+            edit_comment = st.text_area(
+                "Комментарий",
+                value=preparation_type.comment or "",
+                key=f"edit_preparation_type_comment_{preparation_type.id}",
+            )
+            edit_submitted = st.form_submit_button("Сохранить изменения")
+
+            if edit_submitted:
+                try:
+                    updated_preparation_type = update_preparation_type(
+                        db,
+                        preparation_type.id,
+                        name=edit_name,
+                        comment=edit_comment,
+                    )
+                    db.commit()
+                    st.success(f"Вид заготовки '{updated_preparation_type.name}' сохранён")
+                    st.rerun()
+                except ValueError as e:
+                    db.rollback()
+                    st.error(str(e))
+                except Exception:
+                    db.rollback()
+                    st.error("Не удалось сохранить вид заготовки. Проверьте данные.")
+
+        handle_dialog_delete(
+            db,
+            delete_func=delete_preparation_type,
+            record_id=preparation_type.id,
+            record_name=f"Вид заготовки '{preparation_type.name}'",
+            label="вид заготовки",
+            key_prefix="preparation_type",
+        )
+
+
+@st.dialog("Редактировать упаковку")
+def edit_packaging_dialog(packaging_id: int) -> None:
+    with SessionLocal() as db:
+        packaging_item = find_by_id(list_packaging(db), packaging_id)
+        units = list_units(db)
+        unit_labels, unit_options = unit_select_options(units)
+        if packaging_item is None:
+            st.error("Упаковка не найдена")
+            return
+
+        current_label = next(label for label, unit in unit_options.items() if unit.id == packaging_item.unit_id)
+        with st.form(f"edit_packaging_{packaging_item.id}"):
+            edit_name = st.text_input(
+                "Название упаковки",
+                value=packaging_item.name,
+                key=f"edit_packaging_name_{packaging_item.id}",
+            )
+            edit_unit_name = st.selectbox(
+                "Единица измерения",
+                options=unit_labels,
+                index=unit_labels.index(current_label),
+                key=f"edit_packaging_unit_{packaging_item.id}",
+            )
+            edit_comment = st.text_area(
+                "Комментарий",
+                value=packaging_item.comment or "",
+                key=f"edit_packaging_comment_{packaging_item.id}",
+            )
+            st.caption(
+                "Если упаковка уже использовалась в операциях, можно исправить название и комментарий, "
+                "но нельзя менять единицу измерения."
+            )
+            edit_submitted = st.form_submit_button("Сохранить изменения")
+
+            if edit_submitted:
+                try:
+                    updated_packaging = update_packaging(
+                        db,
+                        packaging_item.id,
+                        name=edit_name,
+                        unit=unit_options[edit_unit_name],
+                        comment=edit_comment,
+                    )
+                    db.commit()
+                    st.success(f"Упаковка '{updated_packaging.name}' сохранена")
+                    st.rerun()
+                except ValueError as e:
+                    db.rollback()
+                    st.error(str(e))
+                except Exception:
+                    db.rollback()
+                    st.error("Не удалось сохранить упаковку. Проверьте данные.")
+
+        handle_dialog_delete(
+            db,
+            delete_func=delete_packaging,
+            record_id=packaging_item.id,
+            record_name=f"Упаковка '{packaging_item.name}'",
+            label="упаковка",
+            key_prefix="packaging",
+        )
+
+
+@st.dialog("Редактировать расходник")
+def edit_consumable_dialog(consumable_id: int) -> None:
+    with SessionLocal() as db:
+        consumable = find_by_id(list_consumables(db), consumable_id)
+        units = list_units(db)
+        unit_labels, unit_options = unit_select_options(units)
+        if consumable is None:
+            st.error("Расходник не найден")
+            return
+
+        current_label = next(label for label, unit in unit_options.items() if unit.id == consumable.unit_id)
+        with st.form(f"edit_consumable_{consumable.id}"):
+            edit_name = st.text_input("Название", value=consumable.name, key=f"edit_consumable_name_{consumable.id}")
+            edit_unit_name = st.selectbox(
+                "Единица измерения",
+                options=unit_labels,
+                index=unit_labels.index(current_label),
+                key=f"edit_consumable_unit_{consumable.id}",
+            )
+            edit_comment = st.text_area(
+                "Комментарий",
+                value=consumable.comment or "",
+                key=f"edit_consumable_comment_{consumable.id}",
+            )
+            st.caption(
+                "Если расходник уже использовался в операциях, можно исправить название и комментарий, "
+                "но нельзя менять единицу измерения."
+            )
+            edit_submitted = st.form_submit_button("Сохранить изменения")
+
+            if edit_submitted:
+                try:
+                    updated_consumable = update_consumable(
+                        db,
+                        consumable.id,
+                        name=edit_name,
+                        unit=unit_options[edit_unit_name],
+                        comment=edit_comment,
+                    )
+                    db.commit()
+                    st.success(f"Расходник '{updated_consumable.name}' сохранён")
+                    st.rerun()
+                except ValueError as e:
+                    db.rollback()
+                    st.error(str(e))
+                except Exception:
+                    db.rollback()
+                    st.error("Не удалось сохранить расходник. Проверьте данные.")
+
+        handle_dialog_delete(
+            db,
+            delete_func=delete_consumable,
+            record_id=consumable.id,
+            record_name=f"Расходник '{consumable.name}'",
+            label="расходник",
+            key_prefix="consumable",
+        )
 
 
 tabs = st.tabs(
@@ -77,10 +463,15 @@ with tabs[0]:
 
     st.subheader("Список единиц")
     with SessionLocal() as db:
-        units = db.query(Unit).all()
+        units = list_units(db)
         if units:
             for unit in units:
-                st.write(f"**{unit.name}** ({unit.short_name})")
+                render_reference_row(
+                    f"**{unit.name}** ({unit.short_name})",
+                    f"open_edit_unit_{unit.id}",
+                    edit_unit_dialog,
+                    unit.id,
+                )
         else:
             st.info("Справочник пуст")
 
@@ -91,8 +482,8 @@ with tabs[1]:
     ingredient_form_version = st.session_state.setdefault("ingredient_form_version", 0)
 
     with SessionLocal() as db:
-        units = db.query(Unit).all()
-        unit_options = {unit.name: unit for unit in units}
+        units = list_units(db)
+        unit_labels, unit_options = unit_select_options(units)
 
         if not unit_options:
             st.warning("Сначала добавьте единицы измерения")
@@ -102,7 +493,7 @@ with tabs[1]:
                 name = st.text_input("Название ингредиента", key=f"ingredient_name_{ingredient_form_version}")
                 unit_name = st.selectbox(
                     "Единица измерения",
-                    options=list(unit_options.keys()),
+                    options=unit_labels,
                     key=f"ingredient_unit_{ingredient_form_version}",
                 )
                 comment = st.text_area("Комментарий", key=f"ingredient_comment_{ingredient_form_version}")
@@ -129,10 +520,15 @@ with tabs[1]:
 
     st.subheader("Список ингредиентов")
     with SessionLocal() as db:
-        ingredients = db.query(Ingredient).all()
+        ingredients = list_ingredients(db)
         if ingredients:
             for ingredient in ingredients:
-                st.write(f"**{ingredient.name}** ({ingredient.unit.short_name})")
+                render_reference_row(
+                    f"**{ingredient.name}** ({ingredient.unit.short_name})",
+                    f"open_edit_ingredient_{ingredient.id}",
+                    edit_ingredient_dialog,
+                    ingredient.id,
+                )
         else:
             st.info("Справочник пуст")
 
@@ -151,21 +547,28 @@ with tabs[2]:
                 st.error("Название обязательно")
             else:
                 with SessionLocal() as db:
-                    new_product = Product(name=name, comment=comment)
-                    db.add(new_product)
                     try:
+                        new_product = create_product(db, name=name, comment=comment)
                         db.commit()
-                        st.success(f"Продукт '{name}' добавлен")
-                    except Exception as e:
+                        st.success(f"Продукт '{new_product.name}' добавлен")
+                    except ValueError as e:
                         db.rollback()
-                        st.error(f"Ошибка при добавлении: {e}")
+                        st.error(str(e))
+                    except Exception:
+                        db.rollback()
+                        st.error("Не удалось добавить продукт. Проверьте данные и повторите попытку.")
 
     st.subheader("Список продуктов")
     with SessionLocal() as db:
-        products = db.query(Product).all()
+        products = list_products(db)
         if products:
             for product in products:
-                st.write(f"**{product.name}**")
+                render_reference_row(
+                    f"**{product.name}**",
+                    f"open_edit_product_{product.id}",
+                    edit_product_dialog,
+                    product.id,
+                )
         else:
             st.info("Справочник пуст")
 
@@ -184,21 +587,28 @@ with tabs[3]:
                 st.error("Название обязательно")
             else:
                 with SessionLocal() as db:
-                    new_preparation_type = PreparationType(name=name, comment=comment)
-                    db.add(new_preparation_type)
                     try:
+                        new_preparation_type = create_preparation_type(db, name=name, comment=comment)
                         db.commit()
-                        st.success(f"Вид заготовки '{name}' добавлен")
-                    except Exception as e:
+                        st.success(f"Вид заготовки '{new_preparation_type.name}' добавлен")
+                    except ValueError as e:
                         db.rollback()
-                        st.error(f"Ошибка при добавлении: {e}")
+                        st.error(str(e))
+                    except Exception:
+                        db.rollback()
+                        st.error("Не удалось добавить вид заготовки. Проверьте данные и повторите попытку.")
 
     st.subheader("Список видов заготовок")
     with SessionLocal() as db:
-        preparation_types = db.query(PreparationType).all()
+        preparation_types = list_preparation_types(db)
         if preparation_types:
             for preparation_type in preparation_types:
-                st.write(f"**{preparation_type.name}**")
+                render_reference_row(
+                    f"**{preparation_type.name}**",
+                    f"open_edit_preparation_type_{preparation_type.id}",
+                    edit_preparation_type_dialog,
+                    preparation_type.id,
+                )
         else:
             st.info("Справочник пуст")
 
@@ -207,8 +617,8 @@ with tabs[4]:
     st.header("Упаковка")
 
     with SessionLocal() as db:
-        units = db.query(Unit).all()
-        unit_options = {unit.name: unit.id for unit in units}
+        units = list_units(db)
+        unit_labels, unit_options = unit_select_options(units)
 
         if not unit_options:
             st.warning("Сначала добавьте единицы измерения")
@@ -216,7 +626,7 @@ with tabs[4]:
             with st.form("add_packaging"):
                 st.subheader("Добавить упаковку")
                 name = st.text_input("Название упаковки")
-                unit_name = st.selectbox("Единица измерения", options=list(unit_options.keys()), key="pkg_unit")
+                unit_name = st.selectbox("Единица измерения", options=unit_labels, key="pkg_unit")
                 comment = st.text_area("Комментарий", key="pkg_comment")
                 submitted = st.form_submit_button("Добавить")
 
@@ -224,21 +634,33 @@ with tabs[4]:
                     if not name:
                         st.error("Название обязательно")
                     else:
-                        new_packaging = Packaging(name=name, unit_id=unit_options[unit_name], comment=comment)
-                        db.add(new_packaging)
                         try:
+                            new_packaging = create_packaging(
+                                db,
+                                name=name,
+                                unit=unit_options[unit_name],
+                                comment=comment,
+                            )
                             db.commit()
-                            st.success(f"Упаковка '{name}' добавлена")
-                        except Exception as e:
+                            st.success(f"Упаковка '{new_packaging.name}' добавлена")
+                        except ValueError as e:
                             db.rollback()
-                            st.error(f"Ошибка при добавлении: {e}")
+                            st.error(str(e))
+                        except Exception:
+                            db.rollback()
+                            st.error("Не удалось добавить упаковку. Проверьте данные и повторите попытку.")
 
     st.subheader("Список упаковок")
     with SessionLocal() as db:
-        packaging_items = db.query(Packaging).all()
+        packaging_items = list_packaging(db)
         if packaging_items:
             for packaging_item in packaging_items:
-                st.write(f"**{packaging_item.name}** ({packaging_item.unit.short_name})")
+                render_reference_row(
+                    f"**{packaging_item.name}** ({packaging_item.unit.short_name})",
+                    f"open_edit_packaging_{packaging_item.id}",
+                    edit_packaging_dialog,
+                    packaging_item.id,
+                )
         else:
             st.info("Справочник пуст")
 
@@ -247,8 +669,8 @@ with tabs[5]:
     st.header("Расходники")
 
     with SessionLocal() as db:
-        units = db.query(Unit).all()
-        unit_options = {unit.name: unit.id for unit in units}
+        units = list_units(db)
+        unit_labels, unit_options = unit_select_options(units)
 
         if not unit_options:
             st.warning("Сначала добавьте единицы измерения")
@@ -256,7 +678,7 @@ with tabs[5]:
             with st.form("add_consumable"):
                 st.subheader("Добавить расходник")
                 name = st.text_input("Название")
-                unit_name = st.selectbox("Единица измерения", options=list(unit_options.keys()), key="cons_unit")
+                unit_name = st.selectbox("Единица измерения", options=unit_labels, key="cons_unit")
                 comment = st.text_area("Комментарий", key="cons_comment")
                 submitted = st.form_submit_button("Добавить")
 
@@ -264,21 +686,33 @@ with tabs[5]:
                     if not name:
                         st.error("Название обязательно")
                     else:
-                        new_consumable = Consumable(name=name, unit_id=unit_options[unit_name], comment=comment)
-                        db.add(new_consumable)
                         try:
+                            new_consumable = create_consumable(
+                                db,
+                                name=name,
+                                unit=unit_options[unit_name],
+                                comment=comment,
+                            )
                             db.commit()
-                            st.success(f"Расходник '{name}' добавлен")
-                        except Exception as e:
+                            st.success(f"Расходник '{new_consumable.name}' добавлен")
+                        except ValueError as e:
                             db.rollback()
-                            st.error(f"Ошибка при добавлении: {e}")
+                            st.error(str(e))
+                        except Exception:
+                            db.rollback()
+                            st.error("Не удалось добавить расходник. Проверьте данные и повторите попытку.")
 
     st.subheader("Список расходников")
     with SessionLocal() as db:
-        consumables = db.query(Consumable).all()
+        consumables = list_consumables(db)
         if consumables:
             for consumable in consumables:
-                st.write(f"**{consumable.name}** ({consumable.unit.short_name})")
+                render_reference_row(
+                    f"**{consumable.name}** ({consumable.unit.short_name})",
+                    f"open_edit_consumable_{consumable.id}",
+                    edit_consumable_dialog,
+                    consumable.id,
+                )
         else:
             st.info("Справочник пуст")
 
