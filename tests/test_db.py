@@ -55,6 +55,24 @@ def test_create_app_database_initializes_schema_and_session_factory() -> None:
         assert saved_unit.name == "kilogram"
 
 
+def test_create_app_database_reuses_persistent_engine(tmp_path) -> None:
+    db_path = tmp_path / "cached.sqlite3"
+    database_url = f"sqlite:///{db_path}"
+
+    first_engine, first_session_factory = create_app_database(database_url)
+    second_engine, second_session_factory = create_app_database(database_url)
+
+    assert second_engine is first_engine
+    assert second_session_factory is first_session_factory
+
+
+def test_create_app_database_does_not_cache_in_memory_database() -> None:
+    first_engine, _ = create_app_database("sqlite:///:memory:")
+    second_engine, _ = create_app_database("sqlite:///:memory:")
+
+    assert second_engine is not first_engine
+
+
 def test_create_engine_uses_database_url_env(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "configured" / "nutag.sqlite3"
     monkeypatch.setenv("NUTAG_DATABASE_URL", f"sqlite:///{db_path}")
