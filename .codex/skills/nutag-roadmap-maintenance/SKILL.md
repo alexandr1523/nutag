@@ -30,6 +30,8 @@ Read:
 6. Before changing section `6. Следующий шаг`, audit `Execution Queue` / `Текущая очередь работ` first:
    - identify the first non-done queue item;
    - verify whether it is blocked, waiting for user confirmation, or already checked by the user;
+   - inspect the relevant current implementation files before describing the item as missing, done, or ready for implementation;
+   - if the item concerns a UI form, inspect the Streamlit page and matching service-layer functions, then state what is already implemented and what remains;
    - only skip it when the user explicitly defers it or the plan says it is non-blocking.
 7. When new work is discovered:
    - add or update the matching item in `Domain Backlog` / `Backlog по областям`;

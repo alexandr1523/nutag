@@ -17,31 +17,32 @@ Read the current form before editing it. Useful references:
 
 ## Required Workflow
 
-1. Confirm the specific form is approved before implementation if the plan marks it `approval required`.
-2. Keep UI labels, help text, errors, warnings, and statuses in Russian.
-3. Validate before calling service functions:
+1. Inspect the current Streamlit form and matching service-layer functions before proposing or implementing form work. Explicitly state what is already implemented, what is missing, and whether the plan status matches the code.
+2. Confirm the specific form is approved before implementation if the plan marks it `approval required`.
+3. Keep UI labels, help text, errors, warnings, and statuses in Russian.
+4. Validate before calling service functions:
    - required selections are present;
    - quantities are positive where needed;
    - prices/costs are non-negative;
    - partially filled rows produce explicit errors instead of being silently ignored;
    - destructive actions require explicit confirmation.
-4. Keep service-layer validation as the source of truth for business invariants. UI validation is only a first line of defense.
-5. Be careful with `st.session_state`:
+5. Keep service-layer validation as the source of truth for business invariants. UI validation is only a first line of defense.
+6. Be careful with `st.session_state`:
    - do not mutate a widget key after that widget has been instantiated in the same run;
    - inside `st.form`, do not rely on `disabled=` changing based on another field in the same form;
    - prefer validating submitted values after `form_submit_button`.
-6. For dynamic rows:
+7. For dynamic rows:
    - keep stable keys via a form version or row index strategy;
    - preserve entered data across reruns;
    - clear form state after successful save when duplicate submission is a risk.
-7. For delete flows:
+8. For delete flows:
    - show an irreversible-action warning;
    - require exact text confirmation such as `УДАЛИТЬ`;
    - let the submit happen and validate confirmation after submit if the field is inside `st.form`.
-8. After UI edits, run:
+9. After UI edits, run:
    - `.venv\Scripts\python.exe -m py_compile <changed page>`;
    - `.venv\Scripts\python.exe -m pytest` if service/business logic changed.
-9. Provide a UI test checklist scoped only to the form or stage just changed.
+10. Provide a UI test checklist scoped only to the form or stage just changed.
 
 ## Avoid
 

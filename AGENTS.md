@@ -12,6 +12,7 @@
 
 ## Working Rules
 - Read the current file state before proposing or applying changes.
+- Before proposing the next implementation step, verify the relevant current code and docs instead of relying only on roadmap status. If the next step concerns a UI form, inspect the actual page and service functions first, then state what is already implemented, what is missing, and whether user approval is required.
 - Do not overwrite or revert user changes unless explicitly asked.
 - After changing business logic, run `.venv\Scripts\python.exe -m pytest`.
 - Keep changes minimal, targeted, and consistent with the existing codebase.
@@ -23,6 +24,7 @@
 - Every backlog item should have an explicit status such as `done`, `in progress`, `partial`, `blocked`, `not started`, or `rejected`.
 - Keep exactly one clearly marked next step and make it match the first non-done item in the execution queue. When completing work, update the queue and next step instead of only appending notes.
 - Before changing the next step, audit the execution queue first. Do not choose a task directly from a domain backlog section unless it is first added to the execution queue or the user explicitly redirects.
+- When selecting or describing the next step, do a reality check against the implementation files that would be touched. Do not describe a step as unimplemented, done, or ready for implementation until the relevant code has been inspected in the current working tree.
 - When new work is discovered, add it to the relevant domain backlog and explicitly classify it in the execution queue as `next`, `later`, `blocked`, or `not in MVP` if it affects work order.
 - When product direction changes, move obsolete rules to a deprecated/rejected section instead of leaving contradictory requirements in active sections.
 - Do not add new plan sections that duplicate existing roadmap categories; update the existing category unless a genuinely new category is needed.
